@@ -1,5 +1,22 @@
 import * as SQLite from 'expo-sqlite';
 
+export type Exercise = {
+  id: number;
+  name: string;
+};
+
+export type WorkoutTemplate = {
+  id: number;
+  name: string;
+};
+
+export const createWorkoutTemplateTable = `
+  CREATE TABLE IF NOT EXISTS exercises (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+  );
+`;
+
 export const createExercisesTable = `
   CREATE TABLE IF NOT EXISTS exercises (
     id INTEGER PRIMARY KEY,
@@ -10,6 +27,7 @@ export const createExercisesTable = `
 export async function initializeDatabase() {
   const db = await SQLite.openDatabaseAsync('gymlog.db');
   await db.execAsync(createExercisesTable);
+  await db.execAsync(createWorkoutTemplateTable);
   return db;
 }
 
@@ -25,8 +43,7 @@ export async function insertExercise(
 }
 
 export async function listExercises(db: SQLite.SQLiteDatabase) {
-  return db.getAllAsync<{ id: number; name: string }>(
+  return db.getAllAsync<Exercise>(
     'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
   );
 }
-

@@ -1,21 +1,31 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, TextInput, Button, View, Alert } from 'react-native';
+import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-native';
 import { useEffect, useState } from 'react';
-import { initializeDatabase,insertExercise, listExercises } from './database';
+import { initializeDatabase, insertExercise, listExercises } from './database';
+import type { Exercise } from './database';
+import type { WorkoutTemplate } from './database';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 export default function App() {
 
   const [exerciseName, setExerciseName] = useState('');
 
-  // string[] is an array of strings
-  const [exercises, setExercises] = useState<string[]>([]);
+  // Each exercise retains its database ID and name.
+  const [exercises, setExercises] = useState<Exercise[]>([]);
 
   // this state is just about the connection to the db
   // a database connection OR none yet
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  function addWorkoutTemplate() {
+	if (database === null || isSaving) {
+		return;
+	}
+	setIsModalOpen(true);
+	}
 
   async function addExercise() {
 	if (database === null || isSaving) {
@@ -31,7 +41,7 @@ export default function App() {
 		//no {} around the following: result is immediately returned
 		// === is check without type conversion
 		// (exercise) is one entry from array
-		(exercise) => exercise.toLowerCase() === name.toLowerCase()
+		(exercise) => exercise.name.toLowerCase() === name.toLowerCase()
 	);
 	if (alreadyExists) {
 		Alert.alert('This exercise already exists here');
@@ -44,7 +54,7 @@ export default function App() {
 
 	// ... syntax copies existing exercises and new one into a new array
 	setExercises((current) =>
-		[...current, name].sort((a,b) => a.localeCompare(b)));
+		[...current, { id, name }].sort((a,b) => a.name.localeCompare(b.name)));
 	setExerciseName('');
 	}
 	catch (error) {
@@ -62,7 +72,7 @@ export default function App() {
     initializeDatabase()
     .then(async (db) => {
       const rows = await listExercises(db);
-      setExercises(rows.map((row) => row.name));
+      setExercises(rows);
       setDatabase(db);
       console.log('Database ready');
     })
@@ -89,8 +99,21 @@ export default function App() {
       <Text>You typed: {exerciseName}</Text>
       {exercises.length === 0 && <Text>No exercises yet.</Text>}
       {exercises.map((exercise) => (
-	      <Text key={exercise}>{exercise}</Text>
+	      <Text key={exercise.id}>{exercise.name}</Text>
       ))}
+
+      <Button
+        title={isSaving ? 'Saving…' : 'Create Routine'}
+	onPress={addWorkoutTemplate}
+	disabled={database === null || isSaving}
+      />
+      <Modal
+        visible={isModalOpen}
+	onRequestClose={() => setIsModalOpen(false)}
+      >
+      <Text>Test</Text>
+      </Modal>
+
       <StatusBar style="auto" />
     </View>
       // && means: if true, show text on the right
