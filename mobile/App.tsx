@@ -4,28 +4,56 @@ import { useEffect, useState } from 'react';
 import { initializeDatabase, insertExercise, listExercises } from './database';
 import type { Exercise } from './database';
 import type { WorkoutTemplate } from './database';
+import type { TemplateExerciseTable } from './database';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 export default function App() {
 
-  const [exerciseName, setExerciseName] = useState('');
 
-  // Each exercise retains its database ID and name.
+// todo
+	// new workout modal: save exercises into db
+
+  // for adding new objects
+  const [exerciseName, setExerciseName] = useState('');
+  const [templateName, setTemplateName] = useState('');
+
+  // for adding exercises to new workout
+  const [selectedExerciseIds, setSelectedExerciseIds] = useState<number[]>([]);
+
+  // for having a list of exercises to put into db
   const [exercises, setExercises] = useState<Exercise[]>([]);
 
   // this state is just about the connection to the db
   // a database connection OR none yet
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
 
+
   const [isSaving, setIsSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  function newTemplateMenu() {
+	setTemplateName('');
+	setSelectedExerciseIds([]);
+	setIsModalOpen(true);
+  }
 
   function addWorkoutTemplate() {
 	if (database === null || isSaving) {
 		return;
 	}
-	setIsModalOpen(true);
+  }
+
+  function addExerciseToWorkout(exerciseId) {
+	if (database === null || isSaving) {
+		return;
 	}
+	setSelectedExerciseIds((current) => 
+	  current.includes(exerciseId)
+	    ? current
+	    : [...current, exerciseId]
+        );
+	console.log('Adding exercise', exerciseId);
+  }
 
   async function addExercise() {
 	if (database === null || isSaving) {
@@ -102,16 +130,31 @@ export default function App() {
 	      <Text key={exercise.id}>{exercise.name}</Text>
       ))}
 
-      <Button
+      <Button // NEW ROUTINE
         title={isSaving ? 'Saving…' : 'Create Routine'}
-	onPress={addWorkoutTemplate}
+	onPress={newTemplateMenu}
 	disabled={database === null || isSaving}
       />
       <Modal
         visible={isModalOpen}
 	onRequestClose={() => setIsModalOpen(false)}
       >
-      <Text>Test</Text>
+      <Text>New Workout:</Text>
+      <TextInput
+        placeholder="Workout routine name:"
+	value={templateName}
+	onChangeText={setTemplateName}
+      />
+      {exercises.map((exercise) => (
+        <Button
+	  key={exercise.id}
+	  title={exercise.name}
+	  onPress={() => addExerciseToWorkout(exercise.id)}
+        />
+      ))}
+      <Text>Selected Exercise IDs :{selectedExerciseIds.join(', ')}
+      </Text>
+      <Button title="Cancel" onPress={() => setIsModalOpen(false)} />
       </Modal>
 
       <StatusBar style="auto" />

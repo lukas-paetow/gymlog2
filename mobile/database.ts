@@ -11,7 +11,7 @@ export type WorkoutTemplate = {
 };
 
 export const createWorkoutTemplateTable = `
-  CREATE TABLE IF NOT EXISTS exercises (
+  CREATE TABLE IF NOT EXISTS workout_templates (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL
   );
@@ -24,10 +24,25 @@ export const createExercisesTable = `
   );
 `;
 
+// foreign key: required to exist elsewhere
+export const createTemplateExercisesTable = `
+  CREATE TABLE IF NOT EXISTS templace_exercises (
+    template_id INTEGER NOT NULL,
+    exercise_id INTERGER NOT NULL,
+    position INTERGER NOT NULL,
+    PRIMARY KEY (template_id, exercise_id),
+    UNIQUE (template_id, position),
+    FOREIGN KEY (template_id) REFERENCES workout_templates(id),
+    FOREIGN KEY (exercise_id) REFERENCES exercises(id)
+  );
+`;
+
 export async function initializeDatabase() {
   const db = await SQLite.openDatabaseAsync('gymlog.db');
+  await db.execAsync('PRAGMA foreign_keys = ON;');
   await db.execAsync(createExercisesTable);
   await db.execAsync(createWorkoutTemplateTable);
+  await db.execAsync(createTemplateExercisesTable);
   return db;
 }
 
