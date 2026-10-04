@@ -35,6 +35,7 @@ export default function RoutineScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // open modal and create new routine
   function newTemplateMenu() {
 	setTemplateName('');
 	setSelectedExerciseIds([]);
@@ -47,6 +48,7 @@ export default function RoutineScreen() {
 	}
   }
 
+  // keeps track using setSelectedExerciseIds. need to process that
   function addExerciseToWorkout(exerciseId: number) {
 	if (database === null || isSaving) {
 		return;
@@ -59,6 +61,7 @@ export default function RoutineScreen() {
 	console.log('Adding exercise', exerciseId);
   }
 
+  // Exercises is populated, ExerciseName is reset
   async function addExercise() {
 	if (database === null || isSaving) {
 		return;
@@ -81,6 +84,7 @@ export default function RoutineScreen() {
 	}
 	setIsSaving(true);
 	try{
+		// function from db
 		const id = await insertExercise(database, name);
 		console.log('Saved exercise with ID:', id);
 
@@ -103,7 +107,7 @@ export default function RoutineScreen() {
   useEffect(() => {
     initializeDatabase()
     .then(async (db) => {
-      const rows = await listExercises(db);
+      const rows = await listExercises(db); // function from db
       setExercises(rows);
       setDatabase(db);
       console.log('Database ready');

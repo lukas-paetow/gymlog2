@@ -5,7 +5,8 @@ import ExerciseLibraryScreen from './screens/ExerciseLibraryScreen';
 import SessionScreen from './screens/SessionScreen';
 import RoutineScreen from './screens/RoutineScreen';
 
-// compile-time visibility when we import this somewhere else
+// compile-time visibility when we import this somewhere else. like a struc in c++
+// field name: field type. undefined means that this field takes no parameters
 export type RootStackParamList = {
   Start: undefined;
   ExerciseLibrary: undefined;
@@ -19,7 +20,7 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator>
-        <Stack.Screen name="Start" component={StartScreen} />
+        <Stack.Screen name="Start" component={StartScreen} /> 
         <Stack.Screen name="ExerciseLibrary" component={ExerciseLibraryScreen}
 	  options={{ title: 'Exercise Library' }}
        	/>

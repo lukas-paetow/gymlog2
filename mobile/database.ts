@@ -26,10 +26,10 @@ export const createExercisesTable = `
 
 // foreign key: required to exist elsewhere
 export const createTemplateExercisesTable = `
-  CREATE TABLE IF NOT EXISTS templace_exercises (
+  CREATE TABLE IF NOT EXISTS template_exercises (
     template_id INTEGER NOT NULL,
-    exercise_id INTERGER NOT NULL,
-    position INTERGER NOT NULL,
+    exercise_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
     PRIMARY KEY (template_id, exercise_id),
     UNIQUE (template_id, position),
     FOREIGN KEY (template_id) REFERENCES workout_templates(id),
@@ -60,5 +60,12 @@ export async function insertExercise(
 export async function listExercises(db: SQLite.SQLiteDatabase) {
   return db.getAllAsync<Exercise>(
     'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
-  );
+  );}
+
+export async function insertWorkoutTemplate(
+  db: SQLite.SQLiteDatabase,
+  name: string,
+  exerciseIds: number[]
+) {
+	// something
 }
