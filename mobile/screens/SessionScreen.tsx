@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react';
 
 
 
-export default function ExerciseLibraryScreen() {
+export default function SessionScreen() {
   return (
     <View>
-      <Text>Gymlog library screen </Text>
+      <Text>Gymlog session screen </Text>
     </View>
   )
 }
