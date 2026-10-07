@@ -73,6 +73,24 @@ export async function listWorkoutTemplates(db: SQLite.SQLiteDatabase) {
     'SELECT id, name FROM workout_templates ORDER BY name COLLATE NOCASE'
   );}
 
+// delete links first
+export async function deleteWorkoutTemplate(
+	db: SQLite.SQLiteDatabase,
+	templateId: number
+  ) {
+	await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      'DELETE FROM template_exercises WHERE template_id = ?', 
+      templateId
+    );
+
+    await db.runAsync(
+    'DELETE FROM workout_templates WHERE id = ?',
+    templateId
+    );
+  });
+}
+
 export async function insertWorkoutTemplate(
   db: SQLite.SQLiteDatabase,
   name: string, // template id?

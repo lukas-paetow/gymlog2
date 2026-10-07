@@ -2,7 +2,8 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-native';
 import { useEffect, useState } from 'react';
 
-import { initializeDatabase, insertExercise, insertWorkoutTemplate, listExercises, listWorkoutTemplates } from '../database';
+import { initializeDatabase, insertExercise, insertWorkoutTemplate, listExercises, 
+         listWorkoutTemplates, deleteWorkoutTemplate } from '../database';
 import type { Exercise } from '../database';
 import type { WorkoutTemplate } from '../database';
 import type { SQLiteDatabase } from 'expo-sqlite';
@@ -86,8 +87,45 @@ export default function RoutineScreen() {
 	}
   }
 
+  async function removeRoutine(templateId) {
+    if (database === null || isSaving) {
+      return;
+    }
+    if (!templateId) {
+      Alert.alert('The Routine you are trying to delete has no ID');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await deleteWorkoutTemplate(database, templateId);
+      // update routines 
+      const templates = await listWorkoutTemplates(database);
+      setRoutines(templates);
+    }
+    catch (error) {
+      console.error('Deleting routine failed:', error);
+      Alert.alert('Deleting Routine failed');
+    }
+    finally {
+      setIsSaving(false);
+    }
+  }
 
 
+  function confirmDeleteRoutine(routine: WorkoutTemplate) {
+    Alert.alert(
+    'Delete routine?',
+    `Delete "${routine.name}"?`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => removeRoutine(routine.id),
+      },
+    ]
+  );
+  }
 
   // Exercises is populated, ExerciseName is reset
   async function addExercise() {
@@ -155,7 +193,18 @@ export default function RoutineScreen() {
       </Text>
       {routines.length === 0 && <Text>No routines yet.</Text>}
       {routines.map((routine) => (
-	      <Text key={routine.id}>{routine.name}</Text>
+        <View
+        key={routine.id}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
+        >
+	      <Text>{routine.name}</Text>
+        <Button
+          title ="X"
+          accessibilityLabel={`Delete ${routine.name}`}
+          onPress={() => confirmDeleteRoutine(routine)}
+          disabled={database === null || isSaving}
+        />
+        </View>
       ))}
       <TextInput
         placeholder="Exercise name"
@@ -168,7 +217,7 @@ export default function RoutineScreen() {
 	onPress={addExercise}
 	disabled={database === null || isSaving}
       />
-      <Text>You typed: {exerciseName}</Text>
+      <Text>Your exercises: {exerciseName}</Text>
       {exercises.length === 0 && <Text>No exercises yet.</Text>}
       {exercises.map((exercise) => (
         <Text key={exercise.id}>{exercise.name}</Text>
