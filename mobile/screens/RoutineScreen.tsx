@@ -2,9 +2,9 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-native';
 import { useEffect, useState } from 'react';
 
-import { initializeDatabase, insertExercise, listExercises } from '/home/lukas/projects/gymlog/mobile/database';
-import type { Exercise } from '/home/lukas/projects/gymlog/mobile/database';
-import type { WorkoutTemplate } from '/home/lukas/projects/gymlog/mobile/database';
+import { initializeDatabase, insertExercise, insertWorkoutTemplate, listExercises, listWorkoutTemplates } from '../database';
+import type { Exercise } from '../database';
+import type { WorkoutTemplate } from '../database';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -14,8 +14,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Start'>;
 
 export default function RoutineScreen() {
 
-// todo
-	// new workout modal: save exercises into db
+// TODO
+	// need to refresh routine screen when i close the modal after adding new routine?
+	// yeah ok i will need to write a dedicated function and not be lazy with the button next
 
   // for adding new objects
   const [exerciseName, setExerciseName] = useState('');
@@ -26,6 +27,8 @@ export default function RoutineScreen() {
 
   // for having a list of exercises to put into db
   const [exercises, setExercises] = useState<Exercise[]>([]);
+
+  const [routines, setRoutines] = useState<WorkoutTemplate[]>([]);
 
   // this state is just about the connection to the db
   // a database connection OR none yet
@@ -42,12 +45,6 @@ export default function RoutineScreen() {
 	setIsModalOpen(true);
   }
 
-  function addWorkoutTemplate() {
-	if (database === null || isSaving) {
-		return;
-	}
-  }
-
   // keeps track using setSelectedExerciseIds. need to process that
   function addExerciseToWorkout(exerciseId: number) {
 	if (database === null || isSaving) {
@@ -60,6 +57,37 @@ export default function RoutineScreen() {
         );
 	console.log('Adding exercise', exerciseId);
   }
+
+  // close "Add Routine" Modal, save routine, reset quantities
+  async function addRoutine(){
+	if (database === null || isSaving) {
+		return;
+	}
+	const name = templateName.trim();
+	if (!name) {
+	  Alert.alert('Please enter a name for the Routine');
+	  return;
+	}
+	setIsSaving(true);
+	try {
+		await insertWorkoutTemplate(database,name,selectedExerciseIds);
+		const templates = await listWorkoutTemplates(database); // without await, this is just a promise that has no .map
+		setRoutines(templates);
+		setSelectedExerciseIds([]);
+		setTemplateName('');
+		setIsModalOpen(false);
+	}
+	catch (error) {
+		console.error('Saving new routine failed:', error);
+		Alert.alert('Saving Routine failed');
+	}
+	finally {
+		setIsSaving(false);
+	}
+  }
+
+
+
 
   // Exercises is populated, ExerciseName is reset
   async function addExercise() {
@@ -109,6 +137,8 @@ export default function RoutineScreen() {
     .then(async (db) => {
       const rows = await listExercises(db); // function from db
       setExercises(rows);
+      const templates = await listWorkoutTemplates(db); // function from db
+      setRoutines(templates);
       setDatabase(db);
       console.log('Database ready');
     })
@@ -120,6 +150,13 @@ export default function RoutineScreen() {
 
   return (
     <View style={styles.container}>
+      <Text>
+      Available Routines:
+      </Text>
+      {routines.length === 0 && <Text>No routines yet.</Text>}
+      {routines.map((routine) => (
+	      <Text key={routine.id}>{routine.name}</Text>
+      ))}
       <TextInput
         placeholder="Exercise name"
 	value={exerciseName}
@@ -160,6 +197,14 @@ export default function RoutineScreen() {
         />
       ))}
       <Text>Selected Exercise IDs :{selectedExerciseIds.join(', ')}</Text>
+        <Button
+	  title={isSaving ? 'Saving...' : 'Save Routine'}
+	  onPress={() => addRoutine()}
+	  disabled={database === null || isSaving}
+	 />
+      
+
+
       <Button title="Cancel" onPress={() => setIsModalOpen(false)} />
       </Modal>
     </View>

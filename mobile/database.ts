@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
+// TypeScript types
 export type Exercise = {
   id: number;
   name: string;
@@ -10,6 +11,8 @@ export type WorkoutTemplate = {
   name: string;
 };
 
+// SQL strings we use later
+// primary key: unique
 export const createWorkoutTemplateTable = `
   CREATE TABLE IF NOT EXISTS workout_templates (
     id INTEGER PRIMARY KEY,
@@ -25,6 +28,7 @@ export const createExercisesTable = `
 `;
 
 // foreign key: required to exist elsewhere
+// linking table
 export const createTemplateExercisesTable = `
   CREATE TABLE IF NOT EXISTS template_exercises (
     template_id INTEGER NOT NULL,
@@ -37,13 +41,14 @@ export const createTemplateExercisesTable = `
   );
 `;
 
+// returns a connection so we can use db
 export async function initializeDatabase() {
   const db = await SQLite.openDatabaseAsync('gymlog.db');
   await db.execAsync('PRAGMA foreign_keys = ON;');
   await db.execAsync(createExercisesTable);
   await db.execAsync(createWorkoutTemplateTable);
   await db.execAsync(createTemplateExercisesTable);
-  return db;
+  return db; // a connection
 }
 
 export async function insertExercise(
@@ -57,15 +62,37 @@ export async function insertExercise(
   return result.lastInsertRowId;
 }
 
+// <Exercise> is the expected result shape
 export async function listExercises(db: SQLite.SQLiteDatabase) {
   return db.getAllAsync<Exercise>(
     'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
   );}
 
+export async function listWorkoutTemplates(db: SQLite.SQLiteDatabase) {
+  return db.getAllAsync<WorkoutTemplate>(
+    'SELECT id, name FROM workout_templates ORDER BY name COLLATE NOCASE'
+  );}
+
 export async function insertWorkoutTemplate(
   db: SQLite.SQLiteDatabase,
-  name: string,
+  name: string, // template id?
   exerciseIds: number[]
-) {
-	// something
+){ 
+  await db.withTransactionAsync(async () => 
+  { const result = await db.runAsync( 
+    'INSERT INTO workout_templates (name) VALUES (?)',
+    name
+  );
+  const templateId = result.lastInsertRowId;
+  for (let position = 0; position < exerciseIds.length; position++) {
+    await db.runAsync(
+      `INSERT INTO template_exercises
+        (template_id, exercise_id, position)
+       VALUES (?, ?, ?)`,
+      templateId,
+      exerciseIds[position],
+      position
+    );
+  }
+});
 }
