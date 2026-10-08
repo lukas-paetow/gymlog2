@@ -3,8 +3,8 @@ import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-n
 import { useEffect, useState } from 'react';
 
 
-
 export default function SessionScreen() {
+  const startedAt = new Date().toISOString();
   return (
     <View>
       <Text>Gymlog session screen </Text>

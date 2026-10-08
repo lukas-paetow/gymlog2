@@ -52,6 +52,44 @@ export const createExercisesTable = `
   );
 `;
 
+export const createLoggedSessionsTable = `
+  CREATE TABLE IF NOT EXISTS logged_session (
+    id INTEGER PRIMARY KEY,
+    training_day_id INTEGER,
+    start_time TEXT NOT NULL,
+    finish_time TEXT,
+    training_day_name TEXT NOT NULL,
+    routine_name TEXT NOT NULL, 
+    FOREIGN KEY (training_day_id) REFERENCES training_days(id) ON DELETE SET NULL
+  );
+`;
+
+export const createLoggedExerciseTable = `
+  CREATE TABLE IF NOT EXISTS logged_exercises (
+    id INTEGER PRIMARY KEY,
+    exercise_id INTEGER,
+    logged_session_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    prescribed_sets INTEGER NOT NULL,
+    prescribed_weight_firstset REAL,
+    exercise_name TEXT NOT NULL,
+    FOREIGN KEY (logged_session_id) REFERENCES logged_session(id),
+    FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE SET NULL
+  );
+`;
+
+export const createLoggedSetTable = `
+  CREATE TABLE IF NOT EXISTS logged_set (
+    id INTEGER PRIMARY KEY,
+    logged_exercise_id INTEGER NOT NULL,
+    order_number INTEGER NOT NULL,
+    reps INTEGER NOT NULL,
+    weight REAL,
+    comment TEXT,
+    FOREIGN KEY (logged_exercise_id) REFERENCES logged_exercises(id)
+  );
+`;
+
 
 // connect routines and trainingDays
 // primary key: unique
@@ -63,7 +101,7 @@ export const createTrainingDaysTable = `
     routine_id INTEGER NOT NULL,
     position INTEGER NOT NULL,
     UNIQUE (routine_id, position),
-    FOREIGN KEY (routine_id) REFERENCES routines(id)
+    FOREIGN KEY (routine_id) REFERENCES routines(id) 
   );
 `;
 
