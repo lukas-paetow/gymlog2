@@ -1,414 +1,282 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, TextInput, Button, View, Alert, Modal, ScrollView } from 'react-native';
+import { Alert, Button, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useEffect, useState } from 'react';
-
-import { initializeDatabase, insertExercise, insertWorkoutTemplate, listExercises, 
-         listWorkoutTemplates, listExercisesInRoutine, deleteWorkoutTemplate, deleteExercise } from '../database';
-import type { Exercise } from '../database';
-import type { RoutineExercise } from '../database';
-import type { WorkoutTemplate } from '../database';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import {
+  deleteExercise, deleteRoutine, initializeDatabase, insertExercise, insertRoutine,
+  listExercises, listExercisesInTrainingDay, listRoutines, listTrainingDays,
+} from '../database';
+import type {
+  DayExerciseDraft, Exercise, Routine, TrainingDay, TrainingDayDraft, TrainingDayExercise,
+} from '../database';
 
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../App';
-
-type Props = NativeStackScreenProps<RootStackParamList, 'Start'>;
+type ViewedDay = { day: TrainingDay; exercises: TrainingDayExercise[] };
 
 export default function RoutineScreen() {
-
-// TODO
-	// need to refresh routine screen when i close the modal after adding new routine?
-	// yeah ok i will need to write a dedicated function and not be lazy with the button next
-
-  // for adding new objects
-  const [exerciseName, setExerciseName] = useState('');
-  const [templateName, setTemplateName] = useState('');
-
-  // for adding exercises to new workout
-  const [selectedExerciseIds, setSelectedExerciseIds] = useState<number[]>([]);
-
-  // for having a list of exercises to put into db
-  const [exercises, setExercises] = useState<Exercise[]>([]);
-
-  const [routines, setRoutines] = useState<WorkoutTemplate[]>([]);
-
-  // this state is just about the connection to the db
-  // a database connection OR none yet
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routineName, setRoutineName] = useState('');
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [exerciseName, setExerciseName] = useState('');
+  const [trainingDayName, setTrainingDayName] = useState('');
+  const [draftDays, setDraftDays] = useState<TrainingDayDraft[]>([]);
 
+  const [viewedRoutine, setViewedRoutine] = useState<Routine | null>(null);
+  const [viewedDays, setViewedDays] = useState<ViewedDay[]>([]);
+  const [selectedExercises, setSelectedExercises] = useState<DayExerciseDraft[]>([]);
 
-  const [isSaving, setIsSaving] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [viewedRoutine, setViewedRoutine] = useState<WorkoutTemplate | null>(null);
-  const [viewedExercises, setViewedExercises] = useState<RoutineExercise[]>([]);
-  const [isViewingLoading, setIsViewingLoading] = useState(false);
+  const [editorStep, setEditorStep] = useState<'routine' | 'day'>('routine');
   const [viewError, setViewError] = useState<string | null>(null);
 
-  function viewRoutine(routine: WorkoutTemplate) {
-    if (database === null || isSaving) return;
-    setViewedExercises([]);
-    setViewError(null);
-    setIsViewingLoading(true);
-    setViewedRoutine(routine);
-  }
-
-  function closeRoutineView() {
-    setViewedRoutine(null);
-  }
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingView, setIsLoadingView] = useState(false);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
 
   useEffect(() => {
-    if (database === null || viewedRoutine === null) return;
     let cancelled = false;
+    initializeDatabase().then(async db => {
+      const library = await listExercises(db);
+      const savedRoutines = await listRoutines(db);
+      if (!cancelled) {
+        setExercises(library);
+        setRoutines(savedRoutines);
+        setDatabase(db);
+      }
+    }).catch(error => {
+      console.error('Database initialization failed:', error);
+      if (!cancelled) Alert.alert('Database error', 'Could not open the database.');
+    });
+    return () => { cancelled = true; };
+  }, []);
 
-    listExercisesInRoutine(database, viewedRoutine.id)
-      .then((rows) => {
-        if (!cancelled) setViewedExercises(rows);
-      })
-      .catch((error) => {
-        console.error('Loading routine exercises failed:', error);
-        if (!cancelled) setViewError('Could not load this routine. Close and try again.');
-      })
-      .finally(() => {
-        if (!cancelled) setIsViewingLoading(false);
-      });
-
-    // Ignore results if the modal closes or a different routine is opened.
+  useEffect(() => {
+    if (!database || !viewedRoutine) return;
+    let cancelled = false;
+    listTrainingDays(database, viewedRoutine.id).then(async days => {
+      const contents = await Promise.all(days.map(async day => ({
+        day, exercises: await listExercisesInTrainingDay(database, day.id),
+      })));
+      if (!cancelled) setViewedDays(contents);
+    }).catch(error => {
+      console.error('Loading routine failed:', error);
+      if (!cancelled) setViewError('Could not load this routine.');
+    }).finally(() => {
+      if (!cancelled) setIsLoadingView(false);
+    });
     return () => { cancelled = true; };
   }, [database, viewedRoutine]);
 
-  // open modal and create new routine
-  function newTemplateMenu() {
-	setExerciseName('');
-	setTemplateName('');
-	setSelectedExerciseIds([]);
-	setIsModalOpen(true);
+  function newRoutineMenu() {
+    setRoutineName('');
+    setDraftDays([]);
+    setEditorStep('routine');
+    setIsEditorOpen(true);
   }
 
-  function confirmDeleteExercise(exercise: Exercise) {
-    // TODO: Warn that deleting this exercise changes routines that use it.
-    // Delete only after confirmation, then refresh the library and draft.
-    Alert.alert(
-    'Delete exercise?',
-    `Deleting "${exercise.name}" this deletes it from all routines including it, modifying them.`,
-    [
-      { text: 'Cancel', style: 'cancel' },
+  function newTrainingDayMenu() {
+    setTrainingDayName('');
+    setSelectedExercises([]);
+    setExerciseName('');
+    setEditorStep('day');
+  }
+
+  function addExerciseToTrainingDay(exerciseId: number) {
+    setSelectedExercises(current => current.some(entry => entry.exerciseId === exerciseId)
+      ? current : [...current, { exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]);
+  }
+
+  function addTrainingDay() {
+    const name = trainingDayName.trim();
+    if (!name || selectedExercises.length === 0) {
+      Alert.alert('Training day incomplete', 'Enter a name and select at least one exercise.');
+      return;
+    }
+    if (selectedExercises.some(entry => !Number.isInteger(entry.prescribedSets)
+      || entry.prescribedSets < 1 || !Number.isFinite(entry.prescribedWeightFirstSet))) 
       {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => removeExercise(exercise.id),
-      },
-    ]
-  );
+      Alert.alert('Invalid prescription', 'Sets must be positive integers and weight must be nonnegative.');
+      return;
+    }
+    // This changes the draft only. Save routine writes all days to SQLite.
+    setDraftDays(current => [...current, { name, exercises: selectedExercises }]);
+    setEditorStep('routine');
   }
 
-  // keeps track using setSelectedExerciseIds. need to process that
-  function addExerciseToWorkout(exerciseId: number) {
-	if (database === null || isSaving) {
-		return;
-	}
-	setSelectedExerciseIds((current) =>
-	  current.includes(exerciseId)
-	    ? current
-	    : [...current, exerciseId]
-        );
-	console.log('Adding exercise', exerciseId);
+  async function saveRoutine() {
+    if (!database || isSaving) return;
+    const name = routineName.trim();
+    if (!name || draftDays.length === 0) {
+      Alert.alert('Routine incomplete', 'Enter a name and add at least one training day.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await insertRoutine(database, name, draftDays);
+      setRoutines(await listRoutines(database));
+      setIsEditorOpen(false);
+    } catch (error) {
+      console.error('Saving routine failed:', error);
+      Alert.alert('Save failed', 'Could not save the routine.');
+    } finally { setIsSaving(false); }
   }
 
-  // close "Add Routine" Modal, save routine, reset quantities
-  async function addRoutine(){
-	if (database === null || isSaving) {
-		return;
-	}
-	const name = templateName.trim();
-	if (!name) {
-	  Alert.alert('Please enter a name for the Routine');
-	  return;
-	}
-	setIsSaving(true);
-	try {
-		await insertWorkoutTemplate(database,name,selectedExerciseIds);
-		const templates = await listWorkoutTemplates(database); // without await, this is just a promise that has no .map
-		setRoutines(templates);
-		setSelectedExerciseIds([]);
-		setTemplateName('');
-		setIsModalOpen(false);
-	}
-	catch (error) {
-		console.error('Saving new routine failed:', error);
-		Alert.alert('Saving Routine failed');
-	}
-	finally {
-		setIsSaving(false);
-	}
+  async function addExercise() {
+    if (!database || isSaving) return;
+    const name = exerciseName.trim();
+    if (!name) { Alert.alert('Please enter an exercise name'); return; }
+    if (exercises.some(exercise => exercise.name.toLowerCase() === name.toLowerCase())) {
+      Alert.alert('This exercise already exists'); return;
+    }
+    setIsSaving(true);
+    try {
+      await insertExercise(database, name);
+      setExercises(await listExercises(database));
+      setExerciseName('');
+    } catch (error) {
+      console.error('Adding exercise failed:', error);
+      Alert.alert('Save failed', 'Could not save the exercise.');
+    } finally { setIsSaving(false); }
   }
 
   async function removeExercise(exerciseId: number) {
-    if (database === null || isSaving) {
-      return;
-    }
-    if (!exerciseId) {
-      Alert.alert('The exercise you are trying to delete has no ID');
-      return;
-      }
+    if (!database || isSaving) return;
     setIsSaving(true);
     try {
       await deleteExercise(database, exerciseId);
-      const exercisesNow = await listExercises(database);
-      setExercises(exercisesNow);
-      // do i also need to reset routines here?
-    }
-    catch (error) {
+      setExercises(await listExercises(database));
+      setSelectedExercises(current => current.filter(entry => entry.exerciseId !== exerciseId));
+      setDraftDays(current => current.map(day => ({ ...day,
+        exercises: day.exercises.filter(entry => entry.exerciseId !== exerciseId),
+      })));
+    } catch (error) {
       console.error('Deleting exercise failed:', error);
-      Alert.alert('Deleting exercise failed');
-    }
-    finally {
-      setIsSaving(false);
-    }
+      Alert.alert('Delete failed', 'Could not delete the exercise.');
+    } finally { setIsSaving(false); }
   }
 
-  async function removeRoutine(templateId: number) {
-    if (database === null || isSaving) {
-      return;
-    }
-    if (!templateId) {
-      Alert.alert('The Routine you are trying to delete has no ID');
-      return;
-    }
+  function confirmDeleteExercise(exercise: Exercise) {
+    Alert.alert('Delete exercise?',
+      `Delete "${exercise.name}" from the library and all training days that use it?`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => removeExercise(exercise.id) },
+      ]);
+  }
+
+  async function removeRoutine(id: number) {
+    if (!database || isSaving) return;
     setIsSaving(true);
     try {
-      await deleteWorkoutTemplate(database, templateId);
-      // update routines 
-      const templates = await listWorkoutTemplates(database);
-      setRoutines(templates);
-    }
-    catch (error) {
+      await deleteRoutine(database, id);
+      setRoutines(await listRoutines(database));
+    } catch (error) {
       console.error('Deleting routine failed:', error);
-      Alert.alert('Deleting Routine failed');
-    }
-    finally {
-      setIsSaving(false);
-    }
+      Alert.alert('Delete failed', 'Could not delete the routine.');
+    } finally { setIsSaving(false); }
   }
 
-
-  function confirmDeleteRoutine(routine: WorkoutTemplate) {
-    Alert.alert(
-    'Delete routine?',
-    `Delete "${routine.name}"?`,
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => removeRoutine(routine.id),
-      },
-    ]
-  );
+  function viewRoutine(routine: Routine) {
+    setViewedDays([]);
+    setViewError(null);
+    setIsLoadingView(true);
+    setViewedRoutine(routine);
   }
 
-  // Exercises is populated, ExerciseName is reset
-  async function addExercise() {
-	if (database === null || isSaving) {
-		return;
-	}
-	const name = exerciseName.trim();
-	if (name.length==0) {
-		Alert.alert('Please enter an exercise name');
-		return;
-	}
-
-	const alreadyExists = exercises.some(
-		//no {} around the following: result is immediately returned
-		// === is check without type conversion
-		// (exercise) is one entry from array
-		(exercise) => exercise.name.toLowerCase() === name.toLowerCase()
-	);
-	if (alreadyExists) {
-		Alert.alert('This exercise already exists here');
-		return;
-	}
-	setIsSaving(true);
-	try{
-		// function from db
-		const id = await insertExercise(database, name);
-		console.log('Saved exercise with ID:', id);
-
-	// ... syntax copies existing exercises and new one into a new array
-	setExercises((current) =>
-		[...current, { id, name }].sort((a,b) => a.name.localeCompare(b.name)));
-	setExerciseName('');
-	}
-	catch (error) {
-	  console.error('Saving exercse failed:', error);
-	  Alert.alert('Save failed', 'Could not save exercise.');
-	}
-	finally {
-	  setIsSaving(false);
-	}
+  function closeEditor() {
+    if (isSaving) return;
+    if (editorStep === 'day') setEditorStep('routine');
+    else setIsEditorOpen(false);
   }
 
-  // runs after screen rendering
-  // the [] means it doesn't depend on changing values
-  useEffect(() => {
-    initializeDatabase()
-    .then(async (db) => {
-      const rows = await listExercises(db); // function from db
-      setExercises(rows);
-      const templates = await listWorkoutTemplates(db); // function from db
-      setRoutines(templates);
-      setDatabase(db);
-      console.log('Database ready');
-    })
-    .catch((error) => {
-      console.error('Database initialization failed:', error);
-      Alert.alert('Database error', 'Could not open the exercise database.');
-    });
-  }, []);
-
+  const busy = database === null || isSaving;
   return (
     <View style={styles.container}>
-      <Text>
-      Available Routines:
-      </Text>
-      {routines.length === 0 && <Text>No routines yet.</Text>}
-      {routines.map((routine) => (
-        <View
-        key={routine.id}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
-        >
-        <Button
-          title="View"
-          accessibilityLabel={`View ${routine.name}`}
-          onPress={() => viewRoutine(routine)}
-          disabled={database === null || isSaving}
-        />
-	      <Text>{routine.name}</Text>
-        <Button
-          title ="X"
-          accessibilityLabel={`Delete ${routine.name}`}
-          onPress={() => confirmDeleteRoutine(routine)}
-          disabled={database === null || isSaving}
-        />
-        </View>
-      ))}
-
-
-      <Button // NEW ROUTINE
-        title={isSaving ? 'Saving…' : 'Create Routine'}
-        onPress={newTemplateMenu}
-        disabled={database === null || isSaving}
-      />
-      <Modal
-        visible={isModalOpen}
-        onRequestClose={() => setIsModalOpen(false)}
-      >
-      <Text>New Workout:</Text>
-      <TextInput
-        placeholder="Workout routine name:"
-        value={templateName}
-        onChangeText={setTemplateName}
-      />
-      <TextInput
-        placeholder="Exercise name"
-        value={exerciseName}
-        onChangeText={setExerciseName}
-        editable={database !== null && !isSaving}
-      />
-      <Button
-        title={isSaving ? 'Saving…' : 'Add exercise'}
-        onPress={addExercise}
-        disabled={database === null || isSaving}
-      />
-      {exercises.length === 0 && <Text>No exercises yet.</Text>}
-      {exercises.map((exercise) => (
-        <View
-          key={exercise.id}
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}
-        >
-        <Button
-	  title={exercise.name}
-	  onPress={() => addExerciseToWorkout(exercise.id)}
-        />
-        <Button
-          title="X"
-          accessibilityLabel={`Delete ${exercise.name} from library`}
-          onPress={() => confirmDeleteExercise(exercise)}
-          disabled={database === null || isSaving}
-        />
-        </View>
-      ))}
-      <Text>Selected Exercise IDs :{selectedExerciseIds.join(', ')}</Text>
-        <Button
-	  title={isSaving ? 'Saving...' : 'Save Routine'}
-	  onPress={() => addRoutine()}
-	  disabled={database === null || isSaving}
-	 />
-      
-
-
-      <Button title="Cancel" onPress={() => setIsModalOpen(false)} />
-      </Modal>
-      <Modal
-        visible={viewedRoutine !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={closeRoutineView}
-      >
-        <View style={styles.viewBackdrop}>
-          <View style={styles.viewDialog}>
-            <Text style={styles.viewTitle}>{viewedRoutine?.name}</Text>
-            <ScrollView style={styles.viewList}>
-              {isViewingLoading && <Text>Loading exercises…</Text>}
-              {viewError !== null && <Text>{viewError}</Text>}
-              {!isViewingLoading && viewError === null && (
-                viewedExercises.length === 0
-                  ? <Text>No exercises in this routine.</Text>
-                  : viewedExercises.map((exercise, index) => (
-                      <Text key={exercise.id} style={styles.viewExercise}>
-                        {index + 1}. {exercise.name} — {exercise.prescribed_sets} {exercise.prescribed_sets === 1 ? 'set' : 'sets'}
-                      </Text>
-                    ))
-              )}
-            </ScrollView>
-            <Button title="Close" onPress={closeRoutineView} />
+      <Text style={styles.heading}>Routines</Text>
+      <ScrollView>
+        {routines.length === 0 && <Text>No routines yet.</Text>}
+        {routines.map(routine => (
+          <View key={routine.id} style={styles.row}>
+            <Button title="View" onPress={() => viewRoutine(routine)} disabled={busy} />
+            <Text>{routine.name}</Text>
+            <Button title="X" accessibilityLabel={`Delete ${routine.name}`} disabled={busy}
+              onPress={() => Alert.alert('Delete routine?', `Delete "${routine.name}" and all its training days?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => removeRoutine(routine.id) },
+              ])} />
           </View>
-        </View>
+        ))}
+      </ScrollView>
+      <Button title="Add routine" onPress={newRoutineMenu} disabled={busy} />
+      <Modal visible={isEditorOpen} onRequestClose={closeEditor}>
+        <ScrollView contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled">
+          {editorStep === 'routine' ? (
+            <>
+              <Text style={styles.heading}>New routine</Text>
+              <TextInput style={styles.input} placeholder="Routine name" value={routineName}
+                onChangeText={setRoutineName} editable={!isSaving} />
+              {draftDays.map((day, index) => (
+                <Text key={index}>{index + 1}. {day.name} ({day.exercises.length} exercises)</Text>
+              ))}
+              <Button title="Add training day" onPress={newTrainingDayMenu} disabled={busy} />
+              <Button title={isSaving ? 'Saving…' : 'Save routine'} onPress={saveRoutine} disabled={busy} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.heading}>New training day</Text>
+              <TextInput style={styles.input} placeholder="Training day name" value={trainingDayName}
+                onChangeText={setTrainingDayName} editable={!isSaving} />
+              <TextInput style={styles.input} placeholder="New exercise name" value={exerciseName}
+                onChangeText={setExerciseName} editable={!isSaving} />
+              <Button title="Add exercise to library" onPress={addExercise} disabled={busy} />
+              {exercises.map(exercise => (
+                <View key={exercise.id} style={styles.row}>
+                  <Button title={exercise.name} onPress={() => addExerciseToTrainingDay(exercise.id)} disabled={busy} />
+                  <Button title="X" accessibilityLabel={`Delete ${exercise.name} from library`}
+                    onPress={() => confirmDeleteExercise(exercise)} disabled={busy} />
+                </View>
+              ))}
+              <Text style={styles.heading}>Selected exercises</Text>
+              {selectedExercises.map(entry => (
+                <View key={entry.exerciseId}>
+                  <Text>{exercises.find(exercise => exercise.id === entry.exerciseId)?.name}</Text>
+                  <Text>Prescribed sets</Text>
+                  <TextInput style={styles.input} keyboardType="number-pad" value={String(entry.prescribedSets)}
+                    editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
+                      item.exerciseId === entry.exerciseId ? { ...item, prescribedSets: Number(text) } : item))} />
+                  <Text>First-set weight (kg)</Text>
+                  <TextInput style={styles.input} keyboardType="decimal-pad" value={String(entry.prescribedWeightFirstSet)}
+                    editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
+                      item.exerciseId === entry.exerciseId ? { ...item, prescribedWeightFirstSet: Number(text.replace(',', '.')) } : item))} />
+                </View>
+              ))}
+              <Button title="Add day to routine draft" onPress={addTrainingDay} disabled={busy} />
+            </>
+          )}
+          <Button title={editorStep === 'day' ? 'Cancel day' : 'Cancel routine'} onPress={closeEditor} disabled={isSaving} />
+        </ScrollView>
+      </Modal>
+      <Modal visible={viewedRoutine !== null} onRequestClose={() => setViewedRoutine(null)}>
+        <ScrollView contentContainerStyle={styles.editor}>
+          <Text style={styles.heading}>{viewedRoutine?.name}</Text>
+          {isLoadingView && <Text>Loading training days…</Text>}
+          {viewError && <Text>{viewError}</Text>}
+          {!isLoadingView && !viewError && viewedDays.map(({ day, exercises: entries }) => (
+            <View key={day.id}>
+              <Text style={styles.heading}>{day.name}</Text>
+              {entries.map(entry => (
+                <Text key={entry.id}>{entry.name} — {entry.prescribed_sets} sets, {entry.prescribed_weight_firstset} kg</Text>
+              ))}
+            </View>
+          ))}
+          <Button title="Close" onPress={() => setViewedRoutine(null)} />
+        </ScrollView>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  viewBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewDialog: {
-    width: '85%',
-    maxWidth: 480,
-    maxHeight: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-  },
-  viewTitle: {
-    fontSize: 22,
-    marginBottom: 16,
-  },
-  viewList: {
-    flexGrow: 0,
-    marginBottom: 16,
-  },
-  viewExercise: {
-    fontSize: 16,
-    marginBottom: 10,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#ababab',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1, padding: 20, backgroundColor: '#ababab' },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginVertical: 6 },
+  heading: { fontSize: 20, marginVertical: 12 },
+  editor: { padding: 24, paddingTop: 48, gap: 12 },
+  input: { borderWidth: 1, borderColor: '#888', borderRadius: 6, padding: 12 },
 });

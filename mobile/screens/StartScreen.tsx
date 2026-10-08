@@ -3,7 +3,7 @@ import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-n
 import { useEffect, useState } from 'react';
 import { initializeDatabase, insertExercise, listExercises } from '../database';
 import type { Exercise } from '../database';
-import type { WorkoutTemplate } from '../database';
+import type { TrainingDay } from '../database';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,7 +21,7 @@ export default function StartScreen({ navigation }: Props) {
         onPress={() => navigation.navigate('ExerciseLibrary')}
       />
       <Button
-        title="Routines"
+        title="Routines "
         onPress={() => navigation.navigate('Routines')}
       />
       <Button
