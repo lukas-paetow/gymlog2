@@ -6,6 +6,10 @@ export type Exercise = {
   name: string;
 };
 
+export type RoutineExercise = Exercise & {
+  prescribed_sets: number;
+};
+
 export type WorkoutTemplate = {
   id: number;
   name: string;
@@ -34,6 +38,7 @@ export const createTemplateExercisesTable = `
     template_id INTEGER NOT NULL,
     exercise_id INTEGER NOT NULL,
     position INTEGER NOT NULL,
+    prescribed_sets INTEGER NOT NULL DEFAULT 2 CHECK (prescribed_sets >= 1),
     PRIMARY KEY (template_id, exercise_id),
     UNIQUE (template_id, position),
     FOREIGN KEY (template_id) REFERENCES workout_templates(id),
@@ -48,6 +53,7 @@ export async function initializeDatabase() {
   await db.execAsync(createExercisesTable);
   await db.execAsync(createWorkoutTemplateTable);
   await db.execAsync(createTemplateExercisesTable);
+  await migrateDatabase(db);
   return db; // a connection
 }
 
@@ -68,10 +74,44 @@ export async function listExercises(db: SQLite.SQLiteDatabase) {
     'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
   );}
 
+// go through template_exercises, get all exercises belonging to our template_id
+// we join two tables by their ids which are the same! this is done first by sql, then we select
+export async function listExercisesInRoutine(
+  db: SQLite.SQLiteDatabase,
+  templateId: number
+) {
+  return db.getAllAsync<RoutineExercise>(
+    `SELECT exercises.id, exercises.name, template_exercises.prescribed_sets
+     FROM template_exercises
+     JOIN EXERCISES
+     ON exercises.id = template_exercises.exercise_id
+     WHERE template_exercises.template_id = ?
+     ORDER BY template_exercises.position`,
+    templateId
+  );
+}
+
 export async function listWorkoutTemplates(db: SQLite.SQLiteDatabase) {
   return db.getAllAsync<WorkoutTemplate>(
     'SELECT id, name FROM workout_templates ORDER BY name COLLATE NOCASE'
   );}
+
+// withTransactionAsync: commit or roll back all transaction depending on success
+export async function deleteExercise(
+	db: SQLite.SQLiteDatabase,
+	exerciseId: number
+  ) {
+	await db.withTransactionAsync(async () => {
+    await db.runAsync(
+    'DELETE FROM template_exercises WHERE exercise_id = ?',
+    exerciseId
+    );
+    await db.runAsync(
+    'DELETE FROM exercises WHERE id = ?',
+    exerciseId
+    );
+  });
+}
 
 // delete links first
 export async function deleteWorkoutTemplate(
@@ -113,4 +153,33 @@ export async function insertWorkoutTemplate(
     );
   }
 });
+}
+
+// very first version had no prescribed sets
+async function migrateDatabase(db: SQLite.SQLiteDatabase) {
+  await db.withTransactionAsync(async () => {
+    const version = await db.getFirstAsync<{ user_version: number }>(
+      'PRAGMA user_version'
+    );
+
+    if (version?.user_version === 0) {
+      const columns = await db.getAllAsync<{ name: string }>(
+        'PRAGMA table_info(template_exercises)'
+      );
+
+      const hasSets = columns.some(
+        (column) => column.name === 'prescribed_sets'
+      );
+
+      if (!hasSets) {
+        await db.execAsync(`
+          ALTER TABLE template_exercises
+          ADD COLUMN prescribed_sets INTEGER NOT NULL DEFAULT 2
+          CHECK (prescribed_sets >= 1);
+        `);
+      }
+
+      await db.execAsync('PRAGMA user_version = 1');
+    }
+  });
 }

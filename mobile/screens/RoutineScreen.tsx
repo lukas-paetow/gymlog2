@@ -1,10 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, TextInput, Button, View, Alert, Modal } from 'react-native';
+import { StyleSheet, Text, TextInput, Button, View, Alert, Modal, ScrollView } from 'react-native';
 import { useEffect, useState } from 'react';
 
 import { initializeDatabase, insertExercise, insertWorkoutTemplate, listExercises, 
-         listWorkoutTemplates, deleteWorkoutTemplate } from '../database';
+         listWorkoutTemplates, listExercisesInRoutine, deleteWorkoutTemplate, deleteExercise } from '../database';
 import type { Exercise } from '../database';
+import type { RoutineExercise } from '../database';
 import type { WorkoutTemplate } from '../database';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
@@ -38,12 +39,66 @@ export default function RoutineScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [viewedRoutine, setViewedRoutine] = useState<WorkoutTemplate | null>(null);
+  const [viewedExercises, setViewedExercises] = useState<RoutineExercise[]>([]);
+  const [isViewingLoading, setIsViewingLoading] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  function viewRoutine(routine: WorkoutTemplate) {
+    if (database === null || isSaving) return;
+    setViewedExercises([]);
+    setViewError(null);
+    setIsViewingLoading(true);
+    setViewedRoutine(routine);
+  }
+
+  function closeRoutineView() {
+    setViewedRoutine(null);
+  }
+
+  useEffect(() => {
+    if (database === null || viewedRoutine === null) return;
+    let cancelled = false;
+
+    listExercisesInRoutine(database, viewedRoutine.id)
+      .then((rows) => {
+        if (!cancelled) setViewedExercises(rows);
+      })
+      .catch((error) => {
+        console.error('Loading routine exercises failed:', error);
+        if (!cancelled) setViewError('Could not load this routine. Close and try again.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsViewingLoading(false);
+      });
+
+    // Ignore results if the modal closes or a different routine is opened.
+    return () => { cancelled = true; };
+  }, [database, viewedRoutine]);
 
   // open modal and create new routine
   function newTemplateMenu() {
+	setExerciseName('');
 	setTemplateName('');
 	setSelectedExerciseIds([]);
 	setIsModalOpen(true);
+  }
+
+  function confirmDeleteExercise(exercise: Exercise) {
+    // TODO: Warn that deleting this exercise changes routines that use it.
+    // Delete only after confirmation, then refresh the library and draft.
+    Alert.alert(
+    'Delete exercise?',
+    `Deleting "${exercise.name}" this deletes it from all routines including it, modifying them.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => removeExercise(exercise.id),
+      },
+    ]
+  );
   }
 
   // keeps track using setSelectedExerciseIds. need to process that
@@ -87,7 +142,31 @@ export default function RoutineScreen() {
 	}
   }
 
-  async function removeRoutine(templateId) {
+  async function removeExercise(exerciseId: number) {
+    if (database === null || isSaving) {
+      return;
+    }
+    if (!exerciseId) {
+      Alert.alert('The exercise you are trying to delete has no ID');
+      return;
+      }
+    setIsSaving(true);
+    try {
+      await deleteExercise(database, exerciseId);
+      const exercisesNow = await listExercises(database);
+      setExercises(exercisesNow);
+      // do i also need to reset routines here?
+    }
+    catch (error) {
+      console.error('Deleting exercise failed:', error);
+      Alert.alert('Deleting exercise failed');
+    }
+    finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeRoutine(templateId: number) {
     if (database === null || isSaving) {
       return;
     }
@@ -197,6 +276,12 @@ export default function RoutineScreen() {
         key={routine.id}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
         >
+        <Button
+          title="View"
+          accessibilityLabel={`View ${routine.name}`}
+          onPress={() => viewRoutine(routine)}
+          disabled={database === null || isSaving}
+        />
 	      <Text>{routine.name}</Text>
         <Button
           title ="X"
@@ -206,44 +291,51 @@ export default function RoutineScreen() {
         />
         </View>
       ))}
-      <TextInput
-        placeholder="Exercise name"
-	value={exerciseName}
-	onChangeText={setExerciseName}
-        editable={database !== null && !isSaving}
-      />
-      <Button
-        title={isSaving ? 'Saving…' : 'Add exercise'}
-	onPress={addExercise}
-	disabled={database === null || isSaving}
-      />
-      <Text>Your exercises: {exerciseName}</Text>
-      {exercises.length === 0 && <Text>No exercises yet.</Text>}
-      {exercises.map((exercise) => (
-        <Text key={exercise.id}>{exercise.name}</Text>
-      ))}
+
 
       <Button // NEW ROUTINE
         title={isSaving ? 'Saving…' : 'Create Routine'}
-	onPress={newTemplateMenu}
-	disabled={database === null || isSaving}
+        onPress={newTemplateMenu}
+        disabled={database === null || isSaving}
       />
       <Modal
         visible={isModalOpen}
-	onRequestClose={() => setIsModalOpen(false)}
+        onRequestClose={() => setIsModalOpen(false)}
       >
       <Text>New Workout:</Text>
       <TextInput
         placeholder="Workout routine name:"
-	value={templateName}
-	onChangeText={setTemplateName}
+        value={templateName}
+        onChangeText={setTemplateName}
       />
+      <TextInput
+        placeholder="Exercise name"
+        value={exerciseName}
+        onChangeText={setExerciseName}
+        editable={database !== null && !isSaving}
+      />
+      <Button
+        title={isSaving ? 'Saving…' : 'Add exercise'}
+        onPress={addExercise}
+        disabled={database === null || isSaving}
+      />
+      {exercises.length === 0 && <Text>No exercises yet.</Text>}
       {exercises.map((exercise) => (
+        <View
+          key={exercise.id}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}
+        >
         <Button
-	  key={exercise.id}
 	  title={exercise.name}
 	  onPress={() => addExerciseToWorkout(exercise.id)}
         />
+        <Button
+          title="X"
+          accessibilityLabel={`Delete ${exercise.name} from library`}
+          onPress={() => confirmDeleteExercise(exercise)}
+          disabled={database === null || isSaving}
+        />
+        </View>
       ))}
       <Text>Selected Exercise IDs :{selectedExerciseIds.join(', ')}</Text>
         <Button
@@ -256,11 +348,63 @@ export default function RoutineScreen() {
 
       <Button title="Cancel" onPress={() => setIsModalOpen(false)} />
       </Modal>
+      <Modal
+        visible={viewedRoutine !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeRoutineView}
+      >
+        <View style={styles.viewBackdrop}>
+          <View style={styles.viewDialog}>
+            <Text style={styles.viewTitle}>{viewedRoutine?.name}</Text>
+            <ScrollView style={styles.viewList}>
+              {isViewingLoading && <Text>Loading exercises…</Text>}
+              {viewError !== null && <Text>{viewError}</Text>}
+              {!isViewingLoading && viewError === null && (
+                viewedExercises.length === 0
+                  ? <Text>No exercises in this routine.</Text>
+                  : viewedExercises.map((exercise, index) => (
+                      <Text key={exercise.id} style={styles.viewExercise}>
+                        {index + 1}. {exercise.name} — {exercise.prescribed_sets} {exercise.prescribed_sets === 1 ? 'set' : 'sets'}
+                      </Text>
+                    ))
+              )}
+            </ScrollView>
+            <Button title="Close" onPress={closeRoutineView} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  viewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewDialog: {
+    width: '85%',
+    maxWidth: 480,
+    maxHeight: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+  },
+  viewTitle: {
+    fontSize: 22,
+    marginBottom: 16,
+  },
+  viewList: {
+    flexGrow: 0,
+    marginBottom: 16,
+  },
+  viewExercise: {
+    fontSize: 16,
+    marginBottom: 10,
+  },
   container: {
     flex: 1,
     backgroundColor: '#ababab',
