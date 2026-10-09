@@ -14,6 +14,7 @@ type ViewedDay = {
   exercises: TrainingDayExercise[] 
 };
 
+
 export default function RoutineScreen() {
   // database derived 
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
@@ -114,7 +115,7 @@ export default function RoutineScreen() {
     if (selectedExercises.some(entry => !Number.isInteger(entry.prescribedSets)
       || entry.prescribedSets < 1 || !Number.isFinite(entry.prescribedWeightFirstSet))) 
       {
-      Alert.alert('Invalid prescription', 'Sets must be positive integers and weight must be nonnegative.');
+      Alert.alert('Invalid prescription', 'Sets must be positive integers and weight must be finite.');
       return;
     }
     // This changes the draft only. Save routine writes all days to SQLite.
