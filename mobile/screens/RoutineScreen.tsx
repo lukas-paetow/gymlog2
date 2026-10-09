@@ -9,28 +9,42 @@ import type {
   DayExerciseDraft, Exercise, Routine, TrainingDay, TrainingDayDraft, TrainingDayExercise,
 } from '../database';
 
-type ViewedDay = { day: TrainingDay; exercises: TrainingDayExercise[] };
+type ViewedDay = { 
+  day: TrainingDay; 
+  exercises: TrainingDayExercise[] 
+};
 
 export default function RoutineScreen() {
+  // database derived 
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
-  const [routineName, setRoutineName] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [exerciseName, setExerciseName] = useState('');
-  const [trainingDayName, setTrainingDayName] = useState('');
+
+  //building routine
+  const [routineName, setRoutineName] = useState('');
   const [draftDays, setDraftDays] = useState<TrainingDayDraft[]>([]);
 
-  const [viewedRoutine, setViewedRoutine] = useState<Routine | null>(null);
-  const [viewedDays, setViewedDays] = useState<ViewedDay[]>([]);
+  //building training day
   const [selectedExercises, setSelectedExercises] = useState<DayExerciseDraft[]>([]);
+  const [trainingDayName, setTrainingDayName] = useState('');
 
+  // helpers for boulding routine and days
   const [editorStep, setEditorStep] = useState<'routine' | 'day'>('routine');
-  const [viewError, setViewError] = useState<string | null>(null);
-
-  const [isSaving, setIsSaving] = useState(false);
-  const [isLoadingView, setIsLoadingView] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
 
+  //building exercise
+  const [exerciseName, setExerciseName] = useState('');
+
+  // viewing a saved routine
+  const [viewedRoutine, setViewedRoutine] = useState<Routine | null>(null);
+  const [viewedDays, setViewedDays] = useState<ViewedDay[]>([]);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [isLoadingView, setIsLoadingView] = useState(false);
+
+  // database change
+  const [isSaving, setIsSaving] = useState(false);
+
+  // runs after component is mounted ([] empty dependency)
   useEffect(() => {
     let cancelled = false;
     initializeDatabase().then(async db => {
@@ -45,15 +59,22 @@ export default function RoutineScreen() {
       console.error('Database initialization failed:', error);
       if (!cancelled) Alert.alert('Database error', 'Could not open the database.');
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; };  // if effect callback returns a function, react treats it as cleanup.
+                                         // so this is done after unmounting so that no db stuff happens
   }, []);
 
+  // loading routine to view in detail
+  // runs when database or viewedRoutine mounts or changes
   useEffect(() => {
     if (!database || !viewedRoutine) return;
     let cancelled = false;
-    listTrainingDays(database, viewedRoutine.id).then(async days => {
-      const contents = await Promise.all(days.map(async day => ({
-        day, exercises: await listExercisesInTrainingDay(database, day.id),
+    
+    // listTrainingDays returns promise for array of TrainingDays
+    // if a function has await, it needs to be async
+    listTrainingDays(database, viewedRoutine.id).then(async days => { // then passes result to "days". typescript infers type
+      // ({ }) means we want something returned, not just a body { }
+      const contents = await Promise.all(days.map(async day => ({ // promise preserves order and resolves the promises that are returned
+        day, exercises: await listExercisesInTrainingDay(database, day.id), // an object with day and exercise is populated
       })));
       if (!cancelled) setViewedDays(contents);
     }).catch(error => {
@@ -81,7 +102,7 @@ export default function RoutineScreen() {
 
   function addExerciseToTrainingDay(exerciseId: number) {
     setSelectedExercises(current => current.some(entry => entry.exerciseId === exerciseId)
-      ? current : [...current, { exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]);
+      ? current : [...current, { exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]); // no further initialization of TrainingDayExercise
   }
 
   function addTrainingDay() {
@@ -187,11 +208,16 @@ export default function RoutineScreen() {
   }
 
   const busy = database === null || isSaving;
+
+
+
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Routines</Text>
       <ScrollView>
         {routines.length === 0 && <Text>No routines yet.</Text>}
+
+        {/* overview of routines*/}
         {routines.map(routine => (
           <View key={routine.id} style={styles.row}>
             <Button title="View" onPress={() => viewRoutine(routine)} disabled={busy} />
@@ -204,6 +230,7 @@ export default function RoutineScreen() {
           </View>
         ))}
       </ScrollView>
+
       <Button title="Add routine" onPress={newRoutineMenu} disabled={busy} />
       <Modal visible={isEditorOpen} onRequestClose={closeEditor}>
         <ScrollView contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled">
@@ -220,6 +247,7 @@ export default function RoutineScreen() {
             </>
           ) : (
             <>
+
               <Text style={styles.heading}>New training day</Text>
               <TextInput style={styles.input} placeholder="Training day name" value={trainingDayName}
                 onChangeText={setTrainingDayName} editable={!isSaving} />
@@ -233,6 +261,7 @@ export default function RoutineScreen() {
                     onPress={() => confirmDeleteExercise(exercise)} disabled={busy} />
                 </View>
               ))}
+
               <Text style={styles.heading}>Selected exercises</Text>
               {selectedExercises.map(entry => (
                 <View key={entry.exerciseId}>
