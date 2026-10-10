@@ -1,27 +1,32 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, ScrollView, TextInput, Button, View, Alert, Modal } from 'react-native';
 import { useEffect, useState } from 'react';
-import { initializeDatabase, listRoutines, listTrainingDays } from '../database'
+import { createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
 import { Routine, TrainingDay} from '../database'
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../App';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Session'>;
 
 type RoutineWithDays = {
   routine: Routine;
   days: TrainingDay[];
 };
 
-export default function SessionScreen() {
+
+export default function SessionScreen({ navigation }: Props) {
   
   const [routinesWithDays, setRoutinesWithDays] = useState<RoutineWithDays[]>([]); // the initial value is at the end
   const [selectedDay, setSelectedDay] = useState<TrainingDay | null>(null);
 
 
-  const startedAt = new Date().toISOString();
-
   useEffect(() => {
     let cancelled = false;
     async function loadRoutines() {
       try {
+        const start = performance.now();
         const db = await initializeDatabase();
+        console.log(`DB initialization: ${performance.now() - start} ms`);
         const routines = await listRoutines(db);
         const contents = await Promise.all(
           routines.map(async routine => ({ routine, days: await listTrainingDays(db, routine.id) })) // this is where RoutineWithDays comes in
@@ -38,11 +43,20 @@ export default function SessionScreen() {
     return () => {cancelled = true; };
   }, []);
       
-  function startWorkout() {
+
+  async function startWorkout() {
     if (selectedDay === null) return;
     console.log('Starting workout for:', selectedDay.name);
-    //navigation.navigate('ActiveSession', { sessionId });
-  }
+    try {
+        const db = await initializeDatabase();
+        const sessionId = await createLoggedSession(db, selectedDay.id);
+        navigation.navigate('ActiveSession', { sessionId });
+    } catch (error) {
+        console.error('Starting workout failed:', error);
+        Alert.alert('Start failed', 'Could not start the workout.');
+    }
+}
+
 
   return (
     <ScrollView contentContainerStyle={{ padding:20}}>

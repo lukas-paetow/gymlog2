@@ -34,13 +34,6 @@ export type TrainingDayDraft = {
 // for drafting 
 export type DayExerciseDraft = Omit<TrainingDayExercise, 'name'>;
 
-/*
-export type DayExerciseDraft = {
-  exerciseId: number;
-  prescribedSets: number;
-  prescribedWeightFirstSet: number;
-};
-*/
 
 
 export const createRoutinesTable = `
@@ -90,6 +83,7 @@ export const createLoggedSetTable = `
     logged_exercise_id INTEGER NOT NULL,
     order_number INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    rep_pr_improvement INTEGER CHECK (rep_pr_improvement >= 0),
     weight REAL,
     comment TEXT,
     FOREIGN KEY (logged_exercise_id) REFERENCES logged_exercises(id)
@@ -128,16 +122,18 @@ export const createDayExercisesTable = `
 
 // returns a connection so we can use db
 export async function initializeDatabase() {
-  const db = await SQLite.openDatabaseAsync('gymlog.db');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
-  await db.execAsync(createRoutinesTable);
-  await db.execAsync(createExercisesTable);
-  await db.execAsync(createTrainingDaysTable);
-  await db.execAsync(createDayExercisesTable);
-  await db.execAsync(createLoggedSessionsTable);
-  await db.execAsync(createLoggedExerciseTable);
-  await db.execAsync(createLoggedSetTable);
-  return db; // a connection
+  return measureDb('initializeDatabase', async () => {
+    const db = await SQLite.openDatabaseAsync('gymlog.db');
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+    await db.execAsync(createRoutinesTable);
+    await db.execAsync(createExercisesTable);
+    await db.execAsync(createTrainingDaysTable);
+    await db.execAsync(createDayExercisesTable);
+    await db.execAsync(createLoggedSessionsTable);
+    await db.execAsync(createLoggedExerciseTable);
+    await db.execAsync(createLoggedSetTable);
+    return db; // a connection
+  });
 }
 
 // put new exercise into db
@@ -145,18 +141,23 @@ export async function insertExercise(
   db: SQLite.SQLiteDatabase,
   name: string
 ) {
-  const result = await db.runAsync(
-    'INSERT INTO exercises (name) VALUES (?)',
-    name
-  );
-  return result.lastInsertRowId;
+  return measureDb('insertExercise', async () => {
+    const result = await db.runAsync(
+      'INSERT INTO exercises (name) VALUES (?)',
+      name
+    );
+    return result.lastInsertRowId;
+  });
 }
 
 // <Exercise> is the expected result shape
 export async function listExercises(db: SQLite.SQLiteDatabase) {
-  return db.getAllAsync<Exercise>(
-    'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
-  );}
+  return measureDb('listExercises', async () => {
+    return db.getAllAsync<Exercise>(
+      'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
+    );
+  });
+}
 
 // go through day_exercises, get all exercises belonging to our training_day_id
 // we join two tables by their ids which are the same! this is done first by sql, then we select
@@ -164,29 +165,83 @@ export async function listExercisesInTrainingDay(
   db: SQLite.SQLiteDatabase,
   trainingDayId: number
 ) {
-  return db.getAllAsync<TrainingDayExercise>(
-    `SELECT exercises.id, exercises.name, day_exercises.prescribed_sets AS prescribedSets, day_exercises.prescribed_weight_firstset AS prescribedWeightFirstSet
-     FROM day_exercises
-     JOIN EXERCISES
-     ON exercises.id = day_exercises.exercise_id
-     WHERE day_exercises.training_day_id = ?
-     ORDER BY day_exercises.position`,
-    trainingDayId
+  return measureDb('listExercisesInTrainingDay', async () => {
+    return db.getAllAsync<TrainingDayExercise>(
+      `SELECT exercises.id, exercises.name, day_exercises.prescribed_sets AS prescribedSets, 
+         day_exercises.prescribed_weight_firstset AS prescribedWeightFirstSet
+       FROM day_exercises
+       JOIN EXERCISES
+       ON exercises.id = day_exercises.exercise_id
+       WHERE day_exercises.training_day_id = ?
+       ORDER BY day_exercises.position`,
+      trainingDayId
+    );
+  });
+}
+
+export async function listRoutines(db: SQLite.SQLiteDatabase): Promise<Routine[]> {
+  return measureDb('listRoutines', () =>
+    db.getAllAsync<Routine>(
+      'SELECT id, name FROM routines ORDER BY name COLLATE NOCASE',
+    ),
   );
 }
 
-export async function listRoutines(db: SQLite.SQLiteDatabase) {
-  return db.getAllAsync<Routine>(
-    'SELECT id, name FROM routines ORDER BY name COLLATE NOCASE'
+export async function listTrainingDays(db: SQLite.SQLiteDatabase, routineId: number): Promise<TrainingDay[]> {
+  return measureDb('listTrainingDays', () =>
+    db.getAllAsync<TrainingDay>(
+      `SELECT id, name, routine_id AS routineId, position 
+       FROM training_days
+       WHERE routine_id = ? 
+       ORDER BY position`,
+       routineId
+    ),
   );
 }
 
-export async function listTrainingDays(db: SQLite.SQLiteDatabase, routineId: number) {
-  return db.getAllAsync<TrainingDay>(
-    `SELECT id, name, routine_id AS routineId, position FROM training_days
-     WHERE routine_id = ? ORDER BY position`,
-    routineId
-  );
+
+// from just the training day id, we get routine name and trainingDay name to log with the current time
+// sql joins training_days and routines so we can get info from both
+export async function createLoggedSession(db: SQLite.SQLiteDatabase, trainingDayId: number) {
+  return measureDb('createLoggedSession', async () => {
+    const day = await db.getFirstAsync<{
+      training_day_name: string;
+      routine_name: string;
+    }>(
+      `SELECT training_days.name AS training_day_name,
+              routines.name AS routine_name
+       FROM training_days
+       JOIN routines ON routines.id = training_days.routine_id
+       WHERE training_days.id = ?`,
+      trainingDayId
+    );
+
+    if (!day) {
+      throw new Error('Training day does not exist');
+    }
+
+    const result = await db.runAsync(
+      `INSERT INTO logged_sessions
+       (training_day_id, training_day_name, routine_name, start_time)
+       VALUES (?, ?, ?, ?)`,
+      trainingDayId,
+      day.training_day_name,
+      day.routine_name,
+      new Date().toISOString()
+    );
+
+    return result.lastInsertRowId;
+  });
+}
+
+export async function getLoggedSession(db: SQLite.SQLiteDatabase, sessionId: number) {
+  return measureDb('getLoggedSession', async () => {
+    return db.getFirstAsync<{ trainingDayId: number | null; trainingDayName: string }>(
+      `SELECT training_day_id AS trainingDayId, training_day_name AS trainingDayName
+       FROM logged_sessions WHERE id = ?`,
+      sessionId
+    );
+  });
 }
 
 // withTransactionAsync: commit or roll back all transaction depending on success
@@ -194,15 +249,17 @@ export async function deleteExercise(
 	db: SQLite.SQLiteDatabase,
 	exerciseId: number
   ) {
-	await db.withTransactionAsync(async () => {
-    await db.runAsync(
-    'DELETE FROM day_exercises WHERE exercise_id = ?',
-    exerciseId
-    );
-    await db.runAsync(
-    'DELETE FROM exercises WHERE id = ?',
-    exerciseId
-    );
+  return measureDb('deleteExercise', async () => {
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+      'DELETE FROM day_exercises WHERE exercise_id = ?',
+      exerciseId
+      );
+      await db.runAsync(
+      'DELETE FROM exercises WHERE id = ?',
+      exerciseId
+      );
+    });
   });
 }
 
@@ -211,16 +268,18 @@ export async function deleteTrainingDay(
 	db: SQLite.SQLiteDatabase,
 	trainingDayId: number
   ) {
-	await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      'DELETE FROM day_exercises WHERE training_day_id = ?',
-      trainingDayId
-    );
+  return measureDb('deleteTrainingDay', async () => {
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        'DELETE FROM day_exercises WHERE training_day_id = ?',
+        trainingDayId
+      );
 
-    await db.runAsync(
-    'DELETE FROM training_days WHERE id = ?',
-    trainingDayId
-    );
+      await db.runAsync(
+      'DELETE FROM training_days WHERE id = ?',
+      trainingDayId
+      );
+    });
   });
 }
 
@@ -230,49 +289,69 @@ export async function insertRoutine(
   name: string,
   days: TrainingDayDraft[]
 ) {
-  // error checking for days and exercises
-  if (!name.trim() || days.length === 0) throw new Error('Routine requires a name and training days');
-  for (const day of days) {
-    if (!day.name.trim() || day.exercises.length === 0) throw new Error('Training day requires a name and exercises');
-    for (const entry of day.exercises) {
-      if (!Number.isInteger(entry.prescribedSets) || entry.prescribedSets < 1
-        || !Number.isFinite(entry.prescribedWeightFirstSet)) {
-        throw new Error('Invalid exercise prescription');
+  return measureDb('insertRoutine', async () => {
+    // error checking for days and exercises
+    if (!name.trim() || days.length === 0) throw new Error('Routine requires a name and training days');
+    for (const day of days) {
+      if (!day.name.trim() || day.exercises.length === 0) throw new Error('Training day requires a name and exercises');
+      for (const entry of day.exercises) {
+        if (!Number.isInteger(entry.prescribedSets) || entry.prescribedSets < 1
+          || !Number.isFinite(entry.prescribedWeightFirstSet)) {
+          throw new Error('Invalid exercise prescription');
+        }
       }
     }
-  }
-  let routineId = 0;
-  await db.withTransactionAsync(async () => {
-    const routine = await db.runAsync('INSERT INTO routines (name) VALUES (?)', name.trim());
-    routineId = routine.lastInsertRowId;
-    for (let dayPosition = 0; dayPosition < days.length; dayPosition++) {
-      const day = days[dayPosition]; // 0 is first position
-      const result = await db.runAsync(
-        'INSERT INTO training_days (name, routine_id, position) VALUES (?, ?, ?)',
-        day.name.trim(), routineId, dayPosition
-      );
-      for (let position = 0; position < day.exercises.length; position++) {
-        const entry = day.exercises[position];
-        await db.runAsync(
-          `INSERT INTO day_exercises
-           (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset)
-           VALUES (?, ?, ?, ?, ?)`,
-          result.lastInsertRowId, entry.id, position,
-          entry.prescribedSets, entry.prescribedWeightFirstSet
+    let routineId = 0;
+    await db.withTransactionAsync(async () => {
+      const routine = await db.runAsync('INSERT INTO routines (name) VALUES (?)', name.trim());
+      routineId = routine.lastInsertRowId;
+      for (let dayPosition = 0; dayPosition < days.length; dayPosition++) {
+        const day = days[dayPosition]; // 0 is first position
+        const result = await db.runAsync(
+          'INSERT INTO training_days (name, routine_id, position) VALUES (?, ?, ?)',
+          day.name.trim(), routineId, dayPosition
         );
+        for (let position = 0; position < day.exercises.length; position++) {
+          const entry = day.exercises[position];
+          await db.runAsync(
+            `INSERT INTO day_exercises
+             (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset)
+             VALUES (?, ?, ?, ?, ?)`,
+            result.lastInsertRowId, entry.id, position,
+            entry.prescribedSets, entry.prescribedWeightFirstSet
+          );
+        }
       }
-    }
+    });
+    return routineId;
   });
-  return routineId;
 }
 
 export async function deleteRoutine(db: SQLite.SQLiteDatabase, routineId: number) {
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      `DELETE FROM day_exercises WHERE training_day_id IN
-       (SELECT id FROM training_days WHERE routine_id = ?)`, routineId
-    );
-    await db.runAsync('DELETE FROM training_days WHERE routine_id = ?', routineId);
-    await db.runAsync('DELETE FROM routines WHERE id = ?', routineId);
+  return measureDb('deleteRoutine', async () => {
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `DELETE FROM day_exercises WHERE training_day_id IN
+         (SELECT id FROM training_days WHERE routine_id = ?)`, routineId
+      );
+      await db.runAsync('DELETE FROM training_days WHERE routine_id = ?', routineId);
+      await db.runAsync('DELETE FROM routines WHERE id = ?', routineId);
+    });
   });
 }
+
+async function measureDb<T>(
+    label: string,
+    operation: () => Promise<T>, // operation returns a promise where the eventual result is of type T
+): Promise<T> { // measureDb will also return a promise containing T result type
+    const start = performance.now();
+
+    try {
+        return await operation();
+    } finally {
+        console.log(
+            `[DB] ${label}: ${(performance.now() - start).toFixed(1)} ms`,
+        );
+    }
+}
+
