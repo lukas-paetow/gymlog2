@@ -10,6 +10,7 @@ export type Exercise = {
 export type TrainingDayExercise = Exercise & {
   prescribedSets: number;
   prescribedWeightFirstSet: number;
+  prescribedRepsFirstSet: number;
 };
 
 // contains its own info on where it fits in with routine
@@ -71,6 +72,7 @@ export const createLoggedExerciseTable = `
     position INTEGER NOT NULL,
     prescribed_sets INTEGER NOT NULL,
     prescribed_weight_firstset REAL,
+    prescribed_reps_firstset INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1),
     exercise_name TEXT NOT NULL,
     FOREIGN KEY (logged_session_id) REFERENCES logged_sessions(id),
     FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE SET NULL
@@ -113,12 +115,14 @@ export const createDayExercisesTable = `
     position INTEGER NOT NULL,
     prescribed_sets INTEGER NOT NULL DEFAULT 2 CHECK (prescribed_sets >= 1),
     prescribed_weight_firstset REAL DEFAULT 0,
+    prescribed_reps_firstset INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1),
     PRIMARY KEY (training_day_id, exercise_id),
     UNIQUE (training_day_id, position),
     FOREIGN KEY (training_day_id) REFERENCES training_days(id),
     FOREIGN KEY (exercise_id) REFERENCES exercises(id)
   );
 `;
+
 
 // returns a connection so we can use db
 export async function initializeDatabase() {
@@ -132,6 +136,7 @@ export async function initializeDatabase() {
     await db.execAsync(createLoggedSessionsTable);
     await db.execAsync(createLoggedExerciseTable);
     await db.execAsync(createLoggedSetTable);
+    await migrateFirstSetReps(db);
     return db; // a connection
   });
 }
@@ -168,7 +173,8 @@ export async function listExercisesInTrainingDay(
   return measureDb('listExercisesInTrainingDay', async () => {
     return db.getAllAsync<TrainingDayExercise>(
       `SELECT exercises.id, exercises.name, day_exercises.prescribed_sets AS prescribedSets, 
-         day_exercises.prescribed_weight_firstset AS prescribedWeightFirstSet
+         day_exercises.prescribed_weight_firstset AS prescribedWeightFirstSet,
+         day_exercises.prescribed_reps_firstset AS prescribedRepsFirstSet
        FROM day_exercises
        JOIN EXERCISES
        ON exercises.id = day_exercises.exercise_id
@@ -296,7 +302,8 @@ export async function insertRoutine(
       if (!day.name.trim() || day.exercises.length === 0) throw new Error('Training day requires a name and exercises');
       for (const entry of day.exercises) {
         if (!Number.isInteger(entry.prescribedSets) || entry.prescribedSets < 1
-          || !Number.isFinite(entry.prescribedWeightFirstSet)) {
+          || !Number.isFinite(entry.prescribedWeightFirstSet)
+          || !Number.isInteger(entry.prescribedRepsFirstSet) || entry.prescribedRepsFirstSet < 1) {
           throw new Error('Invalid exercise prescription');
         }
       }
@@ -315,10 +322,10 @@ export async function insertRoutine(
           const entry = day.exercises[position];
           await db.runAsync(
             `INSERT INTO day_exercises
-             (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset)
-             VALUES (?, ?, ?, ?, ?)`,
+             (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             result.lastInsertRowId, entry.id, position,
-            entry.prescribedSets, entry.prescribedWeightFirstSet
+            entry.prescribedSets, entry.prescribedWeightFirstSet, entry.prescribedRepsFirstSet
           );
         }
       }
@@ -353,5 +360,43 @@ async function measureDb<T>(
             `[DB] ${label}: ${(performance.now() - start).toFixed(1)} ms`,
         );
     }
+}
+
+
+// Share an in-progress migration if multiple screens initialize at once.
+let repsMigrationInProgress: Promise<void> | null = null;
+
+async function migrateFirstSetReps(db: SQLite.SQLiteDatabase): Promise<void> {
+  if (repsMigrationInProgress) return repsMigrationInProgress;
+
+  repsMigrationInProgress = measureDb('migrateFirstSetReps', async () => {
+    await db.withTransactionAsync(async () => {
+      const dayColumns = await db.getAllAsync<{ name: string }>(
+        'PRAGMA table_info(day_exercises)'
+      );
+      if (!dayColumns.some(column => column.name === 'prescribed_reps_firstset')) {
+        await db.execAsync(
+          `ALTER TABLE day_exercises ADD COLUMN prescribed_reps_firstset
+           INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1)`
+        );
+      }
+
+      const loggedColumns = await db.getAllAsync<{ name: string }>(
+        'PRAGMA table_info(logged_exercises)'
+      );
+      if (!loggedColumns.some(column => column.name === 'prescribed_reps_firstset')) {
+        await db.execAsync(
+          `ALTER TABLE logged_exercises ADD COLUMN prescribed_reps_firstset
+           INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1)`
+        );
+      }
+    });
+  });
+
+  try {
+    await repsMigrationInProgress;
+  } finally {
+    repsMigrationInProgress = null;
+  }
 }
 

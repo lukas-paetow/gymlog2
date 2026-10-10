@@ -103,7 +103,7 @@ export default function RoutineScreen() {
 
   function addExerciseToTrainingDay(exerciseId: number) {
     setSelectedExercises(current => current.some(entry => entry.id === exerciseId)
-      ? current : [...current, { id: exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]); // no further initialization of TrainingDayExercise
+      ? current : [...current, { id: exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0, prescribedRepsFirstSet: 8 }]); // no further initialization of TrainingDayExercise
   }
 
   function addTrainingDay() {
@@ -113,9 +113,10 @@ export default function RoutineScreen() {
       return;
     }
     if (selectedExercises.some(entry => !Number.isInteger(entry.prescribedSets)
-      || entry.prescribedSets < 1 || !Number.isFinite(entry.prescribedWeightFirstSet))) 
+      || entry.prescribedSets < 1 || !Number.isFinite(entry.prescribedWeightFirstSet)
+      || !Number.isInteger(entry.prescribedRepsFirstSet) || entry.prescribedRepsFirstSet < 1)) 
       {
-      Alert.alert('Invalid prescription', 'Sets must be positive integers and weight must be finite.');
+      Alert.alert('Invalid prescription', 'Sets and first-set reps must be positive integers and weight must be finite.');
       return;
     }
     // This changes the draft only. Save routine writes all days to SQLite.
@@ -271,6 +272,10 @@ export default function RoutineScreen() {
                   <TextInput style={styles.input} keyboardType="number-pad" value={String(entry.prescribedSets)}
                     editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
                       item.id === entry.id ? { ...item, prescribedSets: Number(text) } : item))} />
+                  <Text>First-set reps</Text>
+                  <TextInput style={styles.input} keyboardType="number-pad" value={String(entry.prescribedRepsFirstSet)}
+                    editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
+                      item.id === entry.id ? { ...item, prescribedRepsFirstSet: Number(text) } : item))} />
                   <Text>First-set weight (kg)</Text>
                   <TextInput style={styles.input} keyboardType="decimal-pad" value={String(entry.prescribedWeightFirstSet)}
                     editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
@@ -292,7 +297,7 @@ export default function RoutineScreen() {
             <View key={day.id}>
               <Text style={styles.heading}>{day.name}</Text>
               {entries.map(entry => (
-                <Text key={entry.id}>{entry.name} — {entry.prescribedSets} sets, {entry.prescribedWeightFirstSet} kg</Text>
+                <Text key={entry.id}>{entry.name} — {entry.prescribedSets} sets; first set: {entry.prescribedRepsFirstSet} reps at {entry.prescribedWeightFirstSet} kg</Text>
               ))}
             </View>
           ))}
