@@ -4,6 +4,7 @@ import StartScreen from './screens/StartScreen';
 import ExerciseLibraryScreen from './screens/ExerciseLibraryScreen';
 import SessionScreen from './screens/SessionScreen';
 import RoutineScreen from './screens/RoutineScreen';
+import ActiveSessionScreen from './screens/ActiveSessionScreen';
 
 // compile-time visibility when we import this somewhere else. like a struc in c++
 // field name: field type. undefined means that this field takes no parameters
@@ -12,6 +13,7 @@ export type RootStackParamList = {
   ExerciseLibrary: undefined;
   Session: undefined;
   Routines: undefined;
+  ActiveSession: { sessionId: number };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -29,6 +31,10 @@ export default function App() {
        	/>
         <Stack.Screen name="Routines" component={RoutineScreen}
 	  options={{ title: 'Routines' }}
+        />
+        <Stack.Screen name="ActiveSession"
+                      component={ActiveSessionScreen}
+                      options={{ title: 'Active workout' }}
        	/>
       </Stack.Navigator>
     </NavigationContainer>

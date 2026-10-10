@@ -8,8 +8,8 @@ export type Exercise = {
 
 // an intersection type
 export type TrainingDayExercise = Exercise & {
-  prescribed_sets: number;
-  prescribed_weight_firstset: number;
+  prescribedSets: number;
+  prescribedWeightFirstSet: number;
 };
 
 // contains its own info on where it fits in with routine
@@ -17,7 +17,7 @@ export type TrainingDay = {
   id: number;
   name: string;
   position: number;
-  routine_id: number;
+  routineId: number;
 };
 
 export type Routine = {
@@ -25,17 +25,23 @@ export type Routine = {
   name: string;
 };
 
-// Shared because the screen builds these drafts and the database saves them.
+// for drafting
+export type TrainingDayDraft = {
+  name: string;
+  exercises: DayExerciseDraft[];
+};
+
+// for drafting 
+export type DayExerciseDraft = Omit<TrainingDayExercise, 'name'>;
+
+/*
 export type DayExerciseDraft = {
   exerciseId: number;
   prescribedSets: number;
   prescribedWeightFirstSet: number;
 };
+*/
 
-export type TrainingDayDraft = {
-  name: string;
-  exercises: DayExerciseDraft[];
-};
 
 export const createRoutinesTable = `
   CREATE TABLE IF NOT EXISTS routines (
@@ -53,7 +59,7 @@ export const createExercisesTable = `
 `;
 
 export const createLoggedSessionsTable = `
-  CREATE TABLE IF NOT EXISTS logged_session (
+  CREATE TABLE IF NOT EXISTS logged_sessions (
     id INTEGER PRIMARY KEY,
     training_day_id INTEGER,
     start_time TEXT NOT NULL,
@@ -73,13 +79,13 @@ export const createLoggedExerciseTable = `
     prescribed_sets INTEGER NOT NULL,
     prescribed_weight_firstset REAL,
     exercise_name TEXT NOT NULL,
-    FOREIGN KEY (logged_session_id) REFERENCES logged_session(id),
+    FOREIGN KEY (logged_session_id) REFERENCES logged_sessions(id),
     FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE SET NULL
   );
 `;
 
 export const createLoggedSetTable = `
-  CREATE TABLE IF NOT EXISTS logged_set (
+  CREATE TABLE IF NOT EXISTS logged_sets (
     id INTEGER PRIMARY KEY,
     logged_exercise_id INTEGER NOT NULL,
     order_number INTEGER NOT NULL,
@@ -128,6 +134,9 @@ export async function initializeDatabase() {
   await db.execAsync(createExercisesTable);
   await db.execAsync(createTrainingDaysTable);
   await db.execAsync(createDayExercisesTable);
+  await db.execAsync(createLoggedSessionsTable);
+  await db.execAsync(createLoggedExerciseTable);
+  await db.execAsync(createLoggedSetTable);
   return db; // a connection
 }
 
@@ -156,7 +165,7 @@ export async function listExercisesInTrainingDay(
   trainingDayId: number
 ) {
   return db.getAllAsync<TrainingDayExercise>(
-    `SELECT exercises.id, exercises.name, day_exercises.prescribed_sets, day_exercises.prescribed_weight_firstset
+    `SELECT exercises.id, exercises.name, day_exercises.prescribed_sets AS prescribedSets, day_exercises.prescribed_weight_firstset AS prescribedWeightFirstSet
      FROM day_exercises
      JOIN EXERCISES
      ON exercises.id = day_exercises.exercise_id
@@ -174,7 +183,7 @@ export async function listRoutines(db: SQLite.SQLiteDatabase) {
 
 export async function listTrainingDays(db: SQLite.SQLiteDatabase, routineId: number) {
   return db.getAllAsync<TrainingDay>(
-    `SELECT id, name, routine_id, position FROM training_days
+    `SELECT id, name, routine_id AS routineId, position FROM training_days
      WHERE routine_id = ? ORDER BY position`,
     routineId
   );
@@ -215,12 +224,13 @@ export async function deleteTrainingDay(
   });
 }
 
-// Save the parent, days, and prescriptions as one operation.
+// save routine with its days and exercises
 export async function insertRoutine(
   db: SQLite.SQLiteDatabase,
   name: string,
   days: TrainingDayDraft[]
 ) {
+  // error checking for days and exercises
   if (!name.trim() || days.length === 0) throw new Error('Routine requires a name and training days');
   for (const day of days) {
     if (!day.name.trim() || day.exercises.length === 0) throw new Error('Training day requires a name and exercises');
@@ -236,7 +246,7 @@ export async function insertRoutine(
     const routine = await db.runAsync('INSERT INTO routines (name) VALUES (?)', name.trim());
     routineId = routine.lastInsertRowId;
     for (let dayPosition = 0; dayPosition < days.length; dayPosition++) {
-      const day = days[dayPosition];
+      const day = days[dayPosition]; // 0 is first position
       const result = await db.runAsync(
         'INSERT INTO training_days (name, routine_id, position) VALUES (?, ?, ?)',
         day.name.trim(), routineId, dayPosition
@@ -247,7 +257,7 @@ export async function insertRoutine(
           `INSERT INTO day_exercises
            (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset)
            VALUES (?, ?, ?, ?, ?)`,
-          result.lastInsertRowId, entry.exerciseId, position,
+          result.lastInsertRowId, entry.id, position,
           entry.prescribedSets, entry.prescribedWeightFirstSet
         );
       }

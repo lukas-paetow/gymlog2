@@ -102,8 +102,8 @@ export default function RoutineScreen() {
   }
 
   function addExerciseToTrainingDay(exerciseId: number) {
-    setSelectedExercises(current => current.some(entry => entry.exerciseId === exerciseId)
-      ? current : [...current, { exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]); // no further initialization of TrainingDayExercise
+    setSelectedExercises(current => current.some(entry => entry.id === exerciseId)
+      ? current : [...current, { id: exerciseId, prescribedSets: 2, prescribedWeightFirstSet: 0 }]); // no further initialization of TrainingDayExercise
   }
 
   function addTrainingDay() {
@@ -165,9 +165,9 @@ export default function RoutineScreen() {
     try {
       await deleteExercise(database, exerciseId);
       setExercises(await listExercises(database));
-      setSelectedExercises(current => current.filter(entry => entry.exerciseId !== exerciseId));
+      setSelectedExercises(current => current.filter(entry => entry.id !== exerciseId));
       setDraftDays(current => current.map(day => ({ ...day,
-        exercises: day.exercises.filter(entry => entry.exerciseId !== exerciseId),
+        exercises: day.exercises.filter(entry => entry.id !== exerciseId),
       })));
     } catch (error) {
       console.error('Deleting exercise failed:', error);
@@ -265,16 +265,16 @@ export default function RoutineScreen() {
 
               <Text style={styles.heading}>Selected exercises</Text>
               {selectedExercises.map(entry => (
-                <View key={entry.exerciseId}>
-                  <Text>{exercises.find(exercise => exercise.id === entry.exerciseId)?.name}</Text>
+                <View key={entry.id}>
+                  <Text>{exercises.find(exercise => exercise.id === entry.id)?.name}</Text>
                   <Text>Prescribed sets</Text>
                   <TextInput style={styles.input} keyboardType="number-pad" value={String(entry.prescribedSets)}
                     editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
-                      item.exerciseId === entry.exerciseId ? { ...item, prescribedSets: Number(text) } : item))} />
+                      item.id === entry.id ? { ...item, prescribedSets: Number(text) } : item))} />
                   <Text>First-set weight (kg)</Text>
                   <TextInput style={styles.input} keyboardType="decimal-pad" value={String(entry.prescribedWeightFirstSet)}
                     editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
-                      item.exerciseId === entry.exerciseId ? { ...item, prescribedWeightFirstSet: Number(text.replace(',', '.')) } : item))} />
+                      item.id === entry.id ? { ...item, prescribedWeightFirstSet: Number(text.replace(',', '.')) } : item))} />
                 </View>
               ))}
               <Button title="Add day to routine draft" onPress={addTrainingDay} disabled={busy} />
@@ -292,7 +292,7 @@ export default function RoutineScreen() {
             <View key={day.id}>
               <Text style={styles.heading}>{day.name}</Text>
               {entries.map(entry => (
-                <Text key={entry.id}>{entry.name} — {entry.prescribed_sets} sets, {entry.prescribed_weight_firstset} kg</Text>
+                <Text key={entry.id}>{entry.name} — {entry.prescribedSets} sets, {entry.prescribedWeightFirstSet} kg</Text>
               ))}
             </View>
           ))}
