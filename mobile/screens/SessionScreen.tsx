@@ -24,9 +24,7 @@ export default function SessionScreen({ navigation }: Props) {
     let cancelled = false;
     async function loadRoutines() {
       try {
-        const start = performance.now();
         const db = await initializeDatabase();
-        console.log(`DB initialization: ${performance.now() - start} ms`);
         const routines = await listRoutines(db);
         const contents = await Promise.all(
           routines.map(async routine => ({ routine, days: await listTrainingDays(db, routine.id) })) // this is where RoutineWithDays comes in
