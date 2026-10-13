@@ -6,6 +6,11 @@ export type Exercise = {
   name: string;
 };
 
+export type ExerciseWithRecord = Exercise & {
+  heaviestWeight: number | null;
+  repsAtHeaviestWeight: number | null;
+};
+
 // an intersection type
 export type TrainingDayExercise = Exercise & {
   prescribedSets: number;
@@ -271,6 +276,33 @@ export async function listExercises(db: SQLite.SQLiteDatabase) {
       'SELECT id, name FROM exercises ORDER BY name COLLATE NOCASE'
     );
   });
+}
+
+/** Returns each library exercise's highest logged weight and best reps at that weight. */
+export async function listExercisesWithRecords(db: SQLite.SQLiteDatabase): Promise<ExerciseWithRecord[]> {
+  return measureDb('listExercisesWithRecords', () =>
+    db.getAllAsync<ExerciseWithRecord>(
+      `WITH performed_sets AS (
+         SELECT logged_exercises.exercise_id, logged_sets.weight, logged_sets.reps
+         FROM logged_sets
+         JOIN logged_exercises ON logged_exercises.id = logged_sets.logged_exercise_id
+         WHERE logged_exercises.exercise_id IS NOT NULL AND logged_sets.weight IS NOT NULL
+       ), heaviest_weights AS (
+         SELECT exercise_id, MAX(weight) AS weight
+         FROM performed_sets
+         GROUP BY exercise_id
+       )
+       SELECT exercises.id, exercises.name,
+              heaviest_weights.weight AS heaviestWeight,
+              MAX(performed_sets.reps) AS repsAtHeaviestWeight
+       FROM exercises
+       LEFT JOIN heaviest_weights ON heaviest_weights.exercise_id = exercises.id
+       LEFT JOIN performed_sets ON performed_sets.exercise_id = exercises.id
+                              AND performed_sets.weight = heaviest_weights.weight
+       GROUP BY exercises.id, exercises.name, heaviest_weights.weight
+       ORDER BY exercises.name COLLATE NOCASE`
+    )
+  );
 }
 
 // go through day_exercises, get all exercises belonging to our training_day_id
