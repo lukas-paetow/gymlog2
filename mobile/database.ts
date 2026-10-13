@@ -92,6 +92,115 @@ export const createLoggedSetTable = `
   );
 `;
 
+// Positions come from the active workout, not the training-day template.
+// Assign the exercise position on its first saved set and retain it afterward.
+export async function saveCompletedSet(
+    db: SQLite.SQLiteDatabase,
+    sessionId: number,
+    exercise: TrainingDayExercise,
+    workoutExercisePosition: number,
+    setPosition: number,
+    reps: number,
+    weight: number,
+): Promise<number> {
+    return measureDb('saveCompletedSet', async () => {
+        if (!Number.isInteger(reps) || reps < 1
+            || !Number.isFinite(weight) 
+            || !Number.isInteger(workoutExercisePosition) || workoutExercisePosition < 0
+            || !Number.isInteger(setPosition) || setPosition < 0) {
+            throw new Error('Invalid set values');
+        }
+
+        let setId = 0;
+
+        await db.withTransactionAsync(async () => {
+            const session = await db.getFirstAsync<{
+                finish_time: string | null;
+            }>(
+                'SELECT finish_time FROM logged_sessions WHERE id = ?',
+                sessionId,
+            );
+
+            if (!session) throw new Error('Session not found');
+            if (session.finish_time !== null) {
+                throw new Error('Session already finished');
+            }
+
+            // check if exercise already is logged once
+            let loggedExercise = await db.getFirstAsync<{ id: number }>( // expected type
+                `SELECT id FROM logged_exercises
+                 WHERE logged_session_id = ? AND exercise_id = ?`,
+                sessionId,
+                exercise.id,
+            );
+
+            if (!loggedExercise) {
+                const result = await db.runAsync(
+                    `INSERT INTO logged_exercises (
+                        exercise_id, logged_session_id, position,
+                        exercise_name, prescribed_sets,
+                        prescribed_weight_firstset, prescribed_reps_firstset
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    exercise.id,
+                    sessionId,
+                    workoutExercisePosition,
+                    exercise.name,
+                    exercise.prescribedSets,
+                    exercise.prescribedWeightFirstSet,
+                    exercise.prescribedRepsFirstSet,
+                );
+
+                loggedExercise = { id: result.lastInsertRowId };
+            }
+
+            // Retrying a saved set returns its ID without logging it twice.
+            const existingSet = await db.getFirstAsync<{ id: number }>(
+                `SELECT id FROM logged_sets
+                 WHERE logged_exercise_id = ? AND order_number = ?`,
+                loggedExercise.id,
+                setPosition,
+            );
+
+            if (existingSet) {
+                setId = existingSet.id;
+                return;
+            }
+
+            const record = await db.getFirstAsync<{ maxReps: number | null }>(
+                `SELECT MAX(logged_sets.reps) AS maxReps
+                 FROM logged_sets
+                 JOIN logged_exercises
+                   ON logged_exercises.id = logged_sets.logged_exercise_id
+                 WHERE logged_exercises.exercise_id = ?
+                   AND logged_sets.weight = ?`,
+                exercise.id,
+                weight,
+            );
+
+            const previousMax = record?.maxReps ?? null; // optional chaining - only if record exists, else null
+            const improvement = previousMax === null
+                ? null
+                : Math.max(0, reps - previousMax);
+
+            const result = await db.runAsync(
+                `INSERT INTO logged_sets (
+                    logged_exercise_id, order_number,
+                    reps, weight, rep_pr_improvement
+                 ) VALUES (?, ?, ?, ?, ?)`,
+                loggedExercise.id,
+                setPosition,
+                reps,
+                weight,
+                improvement,
+            );
+
+            setId = result.lastInsertRowId;
+        });
+
+        return setId;
+    });
+}
+
 
 // connect routines and trainingDays
 // primary key: unique
@@ -239,6 +348,9 @@ export async function createLoggedSession(db: SQLite.SQLiteDatabase, trainingDay
     return result.lastInsertRowId;
   });
 }
+
+
+
 
 export async function getLoggedSession(db: SQLite.SQLiteDatabase, sessionId: number) {
   return measureDb('getLoggedSession', async () => {
