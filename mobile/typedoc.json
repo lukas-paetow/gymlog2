@@ -1,0 +1,6 @@
+{
+  "entryPoints": ["database.ts"],
+  "out": "docs/api",
+  "name": "GymLog database",
+  "readme": "none"
+}

@@ -352,6 +352,20 @@ export async function createLoggedSession(db: SQLite.SQLiteDatabase, trainingDay
 
 
 
+/** Finishes a session with a UTC timestamp, preserving the first finish time on retries. */
+export async function finishLoggedSession(db: SQLite.SQLiteDatabase, sessionId: number): Promise<void> {
+  return measureDb('finishLoggedSession', async () => {
+    const result = await db.runAsync(
+      `UPDATE logged_sessions
+       SET finish_time = COALESCE(finish_time, ?)
+       WHERE id = ?`,
+      new Date().toISOString(),
+      sessionId
+    );
+    if (result.changes === 0) throw new Error('Session not found');
+  });
+}
+
 export async function getLoggedSession(db: SQLite.SQLiteDatabase, sessionId: number) {
   return measureDb('getLoggedSession', async () => {
     return db.getFirstAsync<{ trainingDayId: number | null; trainingDayName: string }>(

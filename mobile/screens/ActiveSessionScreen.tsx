@@ -2,7 +2,7 @@ import { Alert, Button, Modal, Pressable, ScrollView, Text, TextInput, View } fr
 import Slider from '@react-native-community/slider';
 import { Fragment, useEffect, useRef, useState } from 'react'; import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { getLoggedSession, initializeDatabase, listExercisesInTrainingDay, saveCompletedSet } from '../database';
+import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, saveCompletedSet } from '../database';
 import type { TrainingDayExercise } from '../database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveSession'>;
@@ -24,6 +24,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
   const [exercisePositions, setExercisePositions] = useState<Record<number, number>>({});
 
   const [isFinished, setIsFinished] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const isBusy = isSavingSet || isFinishing;
 
   useEffect(() => {
     let cancelled = false;
@@ -145,12 +147,27 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
     if (savingSetRef.current || isFinished) return;
     Alert.alert('Finish workout?', 'Finish now? Uncompleted sets will be left out of the summary.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Finish', onPress: () => {
-        if (savingSetRef.current) return;
-        setExpandedExerciseId(null);
-        setIsFinished(true);
-      } },
+      { text: 'Finish', onPress: confirmFinishWorkout },
     ]);
+  }
+
+  /** Show the summary only after SQLite has saved the finish timestamp. */
+  async function confirmFinishWorkout() {
+    if (savingSetRef.current || isFinished) return;
+    savingSetRef.current = true;
+    setIsFinishing(true);
+    try {
+      const db = await initializeDatabase();
+      await finishLoggedSession(db, sessionId);
+      setExpandedExerciseId(null);
+      setIsFinished(true);
+    } catch (cause) {
+      console.error('Finishing workout failed:', cause);
+      Alert.alert('Finish failed', 'Could not finish the workout. Please try again.');
+    } finally {
+      savingSetRef.current = false;
+      setIsFinishing(false);
+    }
   }
 
   function closeSummary() {
@@ -222,10 +239,10 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                   style={{ flex: 1 }}
                   accessibilityRole="button"
                   accessibilityLabel={exercise.name}
-                  disabled={isSavingSet || isFinished || completedExerciseIds.includes(exercise.id)}
+                  disabled={isBusy || isFinished || completedExerciseIds.includes(exercise.id)}
                   accessibilityState={{
                     expanded: expandedExerciseId === exercise.id,
-                    disabled: isSavingSet || isFinished || completedExerciseIds.includes(exercise.id),
+                    disabled: isBusy || isFinished || completedExerciseIds.includes(exercise.id),
                   }}
                   onPress={() => setExpandedExerciseId(current =>
                     current === exercise.id ? null : exercise.id
@@ -262,8 +279,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Complete ${exercise.name}`}
-                  accessibilityState={{ disabled: isSavingSet || isFinished || completedExerciseIds.includes(exercise.id) }}
-                  disabled={isSavingSet || isFinished || completedExerciseIds.includes(exercise.id)}
+                  accessibilityState={{ disabled: isBusy || isFinished || completedExerciseIds.includes(exercise.id) }}
+                  disabled={isBusy || isFinished || completedExerciseIds.includes(exercise.id)}
                   onPress={() => completeExercise(exercise.id)}
                   style={({ pressed }) => ({
                     width: 100,
@@ -283,7 +300,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
               {!completedExerciseIds.includes(exercise.id) && expandedExerciseId === exercise.id && (
                 <View style={{ marginTop: 12, gap: 12 }}>
                   {(setDrafts[exercise.id] ?? []).map((set, index, sets) => {
-                    const isEditable = !isSavingSet && !isFinished && !completedExerciseIds.includes(exercise.id)
+                    const isEditable = !isBusy && !isFinished && !completedExerciseIds.includes(exercise.id)
                       && index === sets.findIndex(item => !item.completed);
                     return (
                       <View key={index} style={{ borderTopWidth: 1, borderColor: '#cbd5e1', paddingTop: 12, opacity: isEditable ? 1 : 0.5 }}>
@@ -345,7 +362,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
             </Fragment>
           ))}
           <View style={{ marginTop: 24, marginBottom: 20 }}>
-            <Button title="Finish workout" onPress={finishWorkout} disabled={isSavingSet || isFinished} />
+            <Button title={isFinishing ? 'Finishing…' : 'Finish workout'} onPress={finishWorkout} disabled={isBusy || isFinished} />
           </View>
         </>
       )}
