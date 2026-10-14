@@ -1,8 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, ScrollView, TextInput, Button, View, Alert, Modal } from 'react-native';
-import { useEffect, useState } from 'react';
-import { createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
-import { Routine, TrainingDay} from '../database'
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { getResumableSession, createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
+import { Routine, TrainingDay, UnfinishedSession} from '../database'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 
@@ -20,17 +21,24 @@ export default function SessionScreen({ navigation }: Props) {
   const [selectedDay, setSelectedDay] = useState<TrainingDay | null>(null);
 
 
-  useEffect(() => {
+  const [resumableSession, setResumableSession] = useState<UnfinishedSession | null>(null);
+
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     async function loadRoutines() {
       try {
         const db = await initializeDatabase();
+        const unfinished = await getResumableSession(db);
         const routines = await listRoutines(db);
         const contents = await Promise.all(
           routines.map(async routine => ({ routine, days: await listTrainingDays(db, routine.id) })) // this is where RoutineWithDays comes in
         );
 
-        if (!cancelled) {setRoutinesWithDays(contents); }
+        if (!cancelled) {
+          setRoutinesWithDays(contents);
+          setResumableSession(unfinished);
+          setSelectedDay(current => current && contents.some(entry => entry.days.some(day => day.id === current.id)) ? current : null);
+        }
       }
       catch (error) {
         console.error('Loading routines failed:', error);
@@ -39,7 +47,7 @@ export default function SessionScreen({ navigation }: Props) {
     }
     loadRoutines();
     return () => {cancelled = true; };
-  }, []);
+  }, []));
       
 
   async function startWorkout() {
@@ -56,8 +64,28 @@ export default function SessionScreen({ navigation }: Props) {
 }
 
 
+  async function resumeWorkout() {
+    try {
+      const db = await initializeDatabase();
+      // Recheck the time window in case this screen has been open for hours.
+      const session = await getResumableSession(db);
+      setResumableSession(session);
+      if (session) navigation.navigate('ActiveSession', { sessionId: session.id });
+      else Alert.alert('Resume unavailable', 'There is no unfinished workout from the last six hours.');
+    } catch (error) {
+      console.error('Resuming workout failed:', error);
+      Alert.alert('Resume failed', 'Could not load the workout.');
+    }
+  }
+
+
   return (
     <ScrollView contentContainerStyle={{ padding:20}}>
+      {resumableSession !== null && (
+        <View style={{ gap: 12, marginBottom: 24 }}>
+          <Button title="Resume workout" onPress={resumeWorkout} />
+        </View>
+      )}
       {routinesWithDays.map(({ routine, days}) => ( // object desctructuring with ({ })
         <View key={routine.id}> 
           <Text>{routine.name}</Text>

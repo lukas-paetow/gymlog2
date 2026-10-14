@@ -1,5 +1,5 @@
 {
-  "entryPoints": ["database.ts"],
+  "entryPoints": ["database.ts", "dateFormat.ts"],
   "out": "docs/api",
   "name": "GymLog database",
   "readme": "none"

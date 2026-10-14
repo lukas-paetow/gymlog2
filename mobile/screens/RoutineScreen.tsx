@@ -4,6 +4,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   deleteExercise, deleteRoutine, initializeDatabase, insertExercise, insertRoutine,
   listExercises, listExercisesInTrainingDay, listRoutines, listTrainingDays,
+  updateRoutine,
 } from '../database';
 import type {
   DayExerciseDraft, Exercise, Routine, TrainingDay, TrainingDayDraft, TrainingDayExercise,
@@ -32,6 +33,8 @@ export default function RoutineScreen() {
   // helpers for boulding routine and days
   const [editorStep, setEditorStep] = useState<'routine' | 'day'>('routine');
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editingRoutineId, setEditingRoutineId] = useState<number | null>(null);
+  const [editingDayIndex, setEditingDayIndex] = useState<number | null>(null);
 
   //building exercise
   const [exerciseName, setExerciseName] = useState('');
@@ -88,6 +91,8 @@ export default function RoutineScreen() {
   }, [database, viewedRoutine]);
 
   function newRoutineMenu() {
+    setEditingRoutineId(null);
+    setEditingDayIndex(null);
     setRoutineName('');
     setDraftDays([]);
     setEditorStep('routine');
@@ -95,8 +100,36 @@ export default function RoutineScreen() {
   }
 
   function newTrainingDayMenu() {
+    setEditingDayIndex(null);
     setTrainingDayName('');
     setSelectedExercises([]);
+    setExerciseName('');
+    setEditorStep('day');
+  }
+
+  function editViewedRoutine() {
+    if (!viewedRoutine || isLoadingView || viewError || isSaving) return;
+    setEditingRoutineId(viewedRoutine.id);
+    setRoutineName(viewedRoutine.name);
+    setDraftDays(viewedDays.map(({ day, exercises: entries }) => ({
+      id: day.id, name: day.name,
+      exercises: entries.map(entry => ({
+        id: entry.id, prescribedSets: entry.prescribedSets,
+        prescribedRepsFirstSet: entry.prescribedRepsFirstSet,
+        prescribedWeightFirstSet: entry.prescribedWeightFirstSet,
+      })),
+    })));
+    setEditingDayIndex(null);
+    setEditorStep('routine');
+    setViewedRoutine(null);
+    setIsEditorOpen(true);
+  }
+
+  function editDraftDay(index: number) {
+    const day = draftDays[index];
+    setEditingDayIndex(index);
+    setTrainingDayName(day.name);
+    setSelectedExercises(day.exercises.map(entry => ({ ...entry })));
     setExerciseName('');
     setEditorStep('day');
   }
@@ -120,7 +153,11 @@ export default function RoutineScreen() {
       return;
     }
     // This changes the draft only. Save routine writes all days to SQLite.
-    setDraftDays(current => [...current, { name, exercises: selectedExercises }]);
+    setDraftDays(current => editingDayIndex === null
+      ? [...current, { name, exercises: selectedExercises }]
+      : current.map((day, index) => index === editingDayIndex
+        ? { ...day, name, exercises: selectedExercises } : day));
+    setEditingDayIndex(null);
     setEditorStep('routine');
   }
 
@@ -133,7 +170,8 @@ export default function RoutineScreen() {
     }
     setIsSaving(true);
     try {
-      await insertRoutine(database, name, draftDays);
+      if (editingRoutineId === null) await insertRoutine(database, name, draftDays);
+      else await updateRoutine(database, editingRoutineId, name, draftDays);
       setRoutines(await listRoutines(database));
       setIsEditorOpen(false);
     } catch (error) {
@@ -217,8 +255,8 @@ export default function RoutineScreen() {
     <View style={styles.container}>
       <Text style={styles.heading}>Routines</Text>
       <ScrollView>
-        {routines.length === 0 && <Text>No routines yet.</Text>}
-
+        {/* && means: if true, show text on the right*/}
+        {routines.length === 0 && <Text>No routines yet.</Text>} 
         {/* overview of routines*/}
         {routines.map(routine => (
           <View key={routine.id} style={styles.row}>
@@ -238,24 +276,30 @@ export default function RoutineScreen() {
         <ScrollView contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled">
           {editorStep === 'routine' ? (
             <>
-              <Text style={styles.heading}>New routine</Text>
+              <Text style={styles.heading}>{editingRoutineId === null ? 'New routine' : 'Edit routine'}</Text>
               <TextInput style={styles.input} placeholder="Routine name" value={routineName}
                 onChangeText={setRoutineName} editable={!isSaving} />
               {draftDays.map((day, index) => (
-                <Text key={index}>{index + 1}. {day.name} ({day.exercises.length} exercises)</Text>
+                <View key={day.id ?? `new-${index}`}>
+                  <Text>{index + 1}. {day.name} ({day.exercises.length} exercises)</Text>
+                  <View style={styles.row}>
+                    <Button title="Edit day" onPress={() => editDraftDay(index)} disabled={busy} />
+                    <Button title="Remove day" onPress={() => setDraftDays(current => current.filter((_, position) => position !== index))} disabled={busy} />
+                  </View>
+                </View>
               ))}
               <Button title="Add training day" onPress={newTrainingDayMenu} disabled={busy} />
               <Button title={isSaving ? 'Saving…' : 'Save routine'} onPress={saveRoutine} disabled={busy} />
             </>
           ) : (
             <>
-
-              <Text style={styles.heading}>New training day</Text>
+              <Text style={styles.heading}>{editingDayIndex === null ? 'New training day' : 'Edit training day'}</Text>
               <TextInput style={styles.input} placeholder="Training day name" value={trainingDayName}
                 onChangeText={setTrainingDayName} editable={!isSaving} />
               <TextInput style={styles.input} placeholder="New exercise name" value={exerciseName}
                 onChangeText={setExerciseName} editable={!isSaving} />
-              <Button title="Add exercise to library" onPress={addExercise} disabled={busy} />
+              {/*addExercise() in onPress would call while rendering, like passing a return value*/}
+              <Button title="Add exercise to library" onPress={addExercise} disabled={busy}/>
               {exercises.map(exercise => (
                 <View key={exercise.id} style={styles.row}>
                   <Button title={exercise.name} onPress={() => addExerciseToTrainingDay(exercise.id)} disabled={busy} />
@@ -268,6 +312,8 @@ export default function RoutineScreen() {
               {selectedExercises.map(entry => (
                 <View key={entry.id}>
                   <Text>{exercises.find(exercise => exercise.id === entry.id)?.name}</Text>
+                  <Button title="Remove from day" disabled={busy}
+                    onPress={() => setSelectedExercises(current => current.filter(item => item.id !== entry.id))} />
                   <Text>Prescribed sets</Text>
                   <TextInput style={styles.input} keyboardType="number-pad" value={String(entry.prescribedSets)}
                     editable={!isSaving} onChangeText={text => setSelectedExercises(current => current.map(item =>
@@ -282,10 +328,10 @@ export default function RoutineScreen() {
                       item.id === entry.id ? { ...item, prescribedWeightFirstSet: Number(text.replace(',', '.')) } : item))} />
                 </View>
               ))}
-              <Button title="Add day to routine draft" onPress={addTrainingDay} disabled={busy} />
+              <Button title={editingDayIndex === null ? 'Add day to routine draft' : 'Save day to routine draft'} onPress={addTrainingDay} disabled={busy} />
             </>
           )}
-          <Button title={editorStep === 'day' ? 'Cancel day' : 'Cancel routine'} onPress={closeEditor} disabled={isSaving} />
+          <Button title={editorStep === 'day' ? 'Cancel day' : editingRoutineId === null ? 'Cancel routine' : 'Cancel changes'} onPress={closeEditor} disabled={isSaving} />
         </ScrollView>
       </Modal>
       <Modal visible={viewedRoutine !== null} onRequestClose={() => setViewedRoutine(null)}>
@@ -301,6 +347,7 @@ export default function RoutineScreen() {
               ))}
             </View>
           ))}
+          <Button title="Edit routine" onPress={editViewedRoutine} disabled={busy || isLoadingView || viewError !== null} />
           <Button title="Close" onPress={() => setViewedRoutine(null)} />
         </ScrollView>
       </Modal>

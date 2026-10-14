@@ -2,7 +2,7 @@ import { Alert, Button, Modal, Pressable, ScrollView, Text, TextInput, View } fr
 import Slider from '@react-native-community/slider';
 import { Fragment, useEffect, useRef, useState } from 'react'; import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, saveCompletedSet } from '../database';
+import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, listSavedSessionSets, saveCompletedSet } from '../database';
 import type { TrainingDayExercise } from '../database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveSession'>;
@@ -47,22 +47,61 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
         const session = await getLoggedSession(db, sessionId);
         if (!session) throw new Error('Session not found');
 
-        const rows = session.trainingDayId === null
-          ? []
-          : await listExercisesInTrainingDay(db, session.trainingDayId);
+        const planned = session.trainingDayId === null
+          ? [] : await listExercisesInTrainingDay(db, session.trainingDayId);
+        const savedSets = await listSavedSessionSets(db, sessionId);
+        const rows: TrainingDayExercise[] = [];
+        const drafts: Record<number, SetDraft[]> = {};
+        const positions: Record<number, number> = {};
+        const readOnlyIds: number[] = [];
+
+        function addDrafts(exercise: TrainingDayExercise, count: number) {
+          drafts[exercise.id] = Array.from({ length: count }, (_, index) => ({
+            completed: false,
+            reps: index === 0 ? exercise.prescribedRepsFirstSet : null,
+            weight: index === 0 && exercise.prescribedWeightFirstSet !== null
+              ? String(exercise.prescribedWeightFirstSet) : '',
+          }));
+        }
+
+        // Saved snapshots override a plan that may have changed since starting.
+        for (const saved of savedSets) {
+          const id = saved.exerciseId ?? -saved.loggedExerciseId;
+          if (!drafts[id]) {
+            const exercise: TrainingDayExercise = {
+              id, name: saved.name, prescribedSets: saved.prescribedSets,
+              prescribedWeightFirstSet: saved.prescribedWeightFirstSet ?? 0,
+              prescribedRepsFirstSet: saved.prescribedRepsFirstSet,
+            };
+            rows.push(exercise);
+            addDrafts(exercise, Math.max(saved.prescribedSets, saved.setPosition + 1));
+            positions[id] = saved.position;
+            if (saved.exerciseId === null) readOnlyIds.push(id);
+          }
+          while (drafts[id].length <= saved.setPosition) {
+            drafts[id].push({ completed: false, reps: null, weight: '' });
+          }
+          drafts[id][saved.setPosition] = {
+            completed: true, reps: saved.reps,
+            weight: saved.weight === null ? '' : String(saved.weight),
+          };
+        }
+        for (const exercise of planned) {
+          if (!drafts[exercise.id]) {
+            rows.push(exercise);
+            addDrafts(exercise, exercise.prescribedSets);
+          }
+        }
 
         if (!cancelled) {
           setDayName(session.trainingDayName);
           setExercises(rows);
-          setSetDrafts(Object.fromEntries(rows.map(exercise => [ // exercise.id and array of data pair becomes object
-            exercise.id,
-            Array.from({ length: exercise.prescribedSets }, (_, index) => ({
-              completed: false,
-              reps: index === 0 ? exercise.prescribedRepsFirstSet : null,
-              weight: index === 0 && exercise.prescribedWeightFirstSet !== null
-                ? String(exercise.prescribedWeightFirstSet) : '',
-            })),
-          ])));
+          setSetDrafts(drafts);
+          setExercisePositions(positions);
+          setCompletedExerciseIds(rows.filter(exercise =>
+            readOnlyIds.includes(exercise.id) || drafts[exercise.id].every(set => set.completed)
+          ).map(exercise => exercise.id));
+          setIsFinished(session.finishTime !== null);
           setDayDeleted(session.trainingDayId === null);
         }
       } catch (cause) {
@@ -105,7 +144,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
     const exercise = exercises.find(item => item.id === exerciseId);
     if (!exercise) return;
     const workoutExercisePosition = exercisePositions[exerciseId]
-      ?? Object.keys(exercisePositions).length;
+      ?? Math.max(-1, ...Object.values(exercisePositions)) + 1;
 
     savingSetRef.current = true;
     setIsSavingSet(true);
@@ -200,7 +239,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
       ) : (
         <>
           <Text style={{ fontSize: 24 }}>{dayName}</Text>
-          {dayDeleted && <Text>The original training day has been deleted.</Text>}
+          {dayDeleted && <Text>The original training day has been deleted. Saved exercises are shown below.</Text>}
           {!dayDeleted && exercises.length === 0 && <Text>No planned exercises.</Text>}
           {!dayDeleted && exercises.length > 0 && displayedExercises.length === 0 && (
             <Text>All exercises have been skipped.</Text>

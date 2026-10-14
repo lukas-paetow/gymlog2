@@ -29,11 +29,13 @@ export default function StartScreen({ navigation }: Props) {
         onPress={() => navigation.navigate('Session')}
       />
 
+      <Button
+        title="Workout history"
+        onPress={() => navigation.navigate('WorkoutHistory')}
+      />
+      <Button title="Settings" onPress={() => navigation.navigate('Settings')} />
       <StatusBar style="auto" />
     </View>
-      // && means: if true, show text on the right
-      // addExercise() in onPress would call while rendering, like passing a return value
-      // button disabled until db initialized - which happens after rendering
   );
 }
 

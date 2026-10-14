@@ -1,4 +1,6 @@
 import * as SQLite from 'expo-sqlite';
+import { DEFAULT_DATE_FORMAT, isDateFormat } from './dateFormat';
+import type { DateFormat } from './dateFormat';
 
 // TypeScript types
 export type Exercise = {
@@ -9,6 +11,40 @@ export type Exercise = {
 export type ExerciseWithRecord = Exercise & {
   heaviestWeight: number | null;
   repsAtHeaviestWeight: number | null;
+};
+
+export type UnfinishedSession = {
+  id: number;
+  trainingDayName: string;
+  routineName: string;
+  startTime: string;
+};
+
+export type FinishedWorkout = {
+  id: number;
+  trainingDayName: string;
+  routineName: string;
+  finishTime: string;
+  sets: {
+    id: number;
+    exerciseName: string;
+    setPosition: number;
+    weight: number | null;
+    reps: number;
+  }[];
+};
+
+export type SavedSessionSet = {
+  loggedExerciseId: number;
+  exerciseId: number | null;
+  name: string;
+  position: number;
+  prescribedSets: number;
+  prescribedWeightFirstSet: number | null;
+  prescribedRepsFirstSet: number;
+  setPosition: number;
+  reps: number;
+  weight: number | null;
 };
 
 // an intersection type
@@ -33,6 +69,7 @@ export type Routine = {
 
 // for drafting
 export type TrainingDayDraft = {
+  id?: number; // Present when editing an existing day; absent for a new day.
   name: string;
   exercises: DayExerciseDraft[];
 };
@@ -239,6 +276,13 @@ export const createDayExercisesTable = `
 
 
 // returns a connection so we can use db
+export const createSettingsTable = `
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+  );
+`;
+
 export async function initializeDatabase() {
   return measureDb('initializeDatabase', async () => {
     const db = await SQLite.openDatabaseAsync('gymlog.db');
@@ -250,8 +294,29 @@ export async function initializeDatabase() {
     await db.execAsync(createLoggedSessionsTable);
     await db.execAsync(createLoggedExerciseTable);
     await db.execAsync(createLoggedSetTable);
+    await db.execAsync(createSettingsTable);
     await migrateFirstSetReps(db);
     return db; // a connection
+  });
+}
+
+/** Reads the date preference, defaulting to day/month/year when unset. */
+export async function getDateFormat(db: SQLite.SQLiteDatabase): Promise<DateFormat> {
+  return measureDb('getDateFormat', async () => {
+    const row = await db.getFirstAsync<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'date_format'"
+    );
+    return row && isDateFormat(row.value) ? row.value : DEFAULT_DATE_FORMAT;
+  });
+}
+
+export async function setDateFormat(db: SQLite.SQLiteDatabase, format: DateFormat): Promise<void> {
+  return measureDb('setDateFormat', async () => {
+    if (!isDateFormat(format)) throw new Error('Invalid date format');
+    await db.runAsync(
+      `INSERT INTO app_settings (key, value) VALUES ('date_format', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`, format
+    );
   });
 }
 
@@ -279,6 +344,7 @@ export async function listExercises(db: SQLite.SQLiteDatabase) {
 }
 
 /** Returns each library exercise's highest logged weight and best reps at that weight. */
+// gathers intermediates with relevant info first
 export async function listExercisesWithRecords(db: SQLite.SQLiteDatabase): Promise<ExerciseWithRecord[]> {
   return measureDb('listExercisesWithRecords', () =>
     db.getAllAsync<ExerciseWithRecord>(
@@ -398,10 +464,84 @@ export async function finishLoggedSession(db: SQLite.SQLiteDatabase, sessionId: 
   });
 }
 
+/** Loads finished workouts and performed sets, preserving snapshot names and empty workouts. */
+export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<FinishedWorkout[]> {
+  return measureDb('listFinishedWorkouts', async () => {
+    const rows = await db.getAllAsync<{
+      sessionId: number;
+      trainingDayName: string;
+      routineName: string;
+      finishTime: string;
+      setId: number | null;
+      exerciseName: string | null;
+      setPosition: number | null;
+      weight: number | null;
+      reps: number | null;
+    }>(
+      `SELECT logged_sessions.id AS sessionId,
+              training_day_name AS trainingDayName, routine_name AS routineName,
+              finish_time AS finishTime, logged_sets.id AS setId,
+              exercise_name AS exerciseName, order_number AS setPosition, weight, reps
+       FROM logged_sessions
+       LEFT JOIN logged_exercises ON logged_exercises.logged_session_id = logged_sessions.id
+       LEFT JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
+       WHERE finish_time IS NOT NULL
+       ORDER BY finish_time DESC, logged_sessions.id DESC, logged_exercises.position, order_number, logged_sets.id`
+    );
+    const workouts = new Map<number, FinishedWorkout>();
+    for (const row of rows) {
+      let workout = workouts.get(row.sessionId);
+      if (!workout) {
+        workout = {
+          id: row.sessionId, trainingDayName: row.trainingDayName,
+          routineName: row.routineName, finishTime: row.finishTime, sets: [],
+        };
+        workouts.set(row.sessionId, workout);
+      }
+      if (row.setId !== null && row.exerciseName !== null && row.setPosition !== null && row.reps !== null) {
+        workout.sets.push({
+          id: row.setId, exerciseName: row.exerciseName, setPosition: row.setPosition,
+          weight: row.weight, reps: row.reps,
+        });
+      }
+    }
+    return Array.from(workouts.values());
+  });
+}
+
+/** Offers only the most recent unfinished workout started within six hours. */
+export async function getResumableSession(db: SQLite.SQLiteDatabase): Promise<UnfinishedSession | null> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
+  return measureDb('getResumableSession', () => db.getFirstAsync<UnfinishedSession>(
+    `SELECT id, training_day_name AS trainingDayName, routine_name AS routineName,
+            start_time AS startTime
+     FROM logged_sessions
+     WHERE finish_time IS NULL AND start_time >= ? AND start_time <= ?
+     ORDER BY start_time DESC, id DESC LIMIT 1`,
+    cutoff, now.toISOString()
+  ));
+}
+
+/** Loads performed sets with their original exercise snapshots and workout order. */
+export async function listSavedSessionSets(db: SQLite.SQLiteDatabase, sessionId: number): Promise<SavedSessionSet[]> {
+  return measureDb('listSavedSessionSets', () => db.getAllAsync<SavedSessionSet>(
+    `SELECT logged_exercises.id AS loggedExerciseId, exercise_id AS exerciseId,
+            exercise_name AS name, position,
+            prescribed_sets AS prescribedSets,
+            prescribed_weight_firstset AS prescribedWeightFirstSet,
+            prescribed_reps_firstset AS prescribedRepsFirstSet,
+            order_number AS setPosition, reps, weight
+     FROM logged_exercises
+     JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
+     WHERE logged_session_id = ? ORDER BY position, order_number`, sessionId
+  ));
+}
+
 export async function getLoggedSession(db: SQLite.SQLiteDatabase, sessionId: number) {
   return measureDb('getLoggedSession', async () => {
-    return db.getFirstAsync<{ trainingDayId: number | null; trainingDayName: string }>(
-      `SELECT training_day_id AS trainingDayId, training_day_name AS trainingDayName
+    return db.getFirstAsync<{ trainingDayId: number | null; trainingDayName: string; finishTime: string | null }>(
+      `SELECT training_day_id AS trainingDayId, training_day_name AS trainingDayName, finish_time AS finishTime
        FROM logged_sessions WHERE id = ?`,
       sessionId
     );
@@ -489,6 +629,73 @@ export async function insertRoutine(
       }
     });
     return routineId;
+  });
+}
+
+/** Updates the plan atomically, retaining existing day IDs and logged snapshots. */
+export async function updateRoutine(
+  db: SQLite.SQLiteDatabase,
+  routineId: number,
+  name: string,
+  days: TrainingDayDraft[]
+): Promise<void> {
+  return measureDb('updateRoutine', async () => {
+    if (!name.trim() || days.length === 0) throw new Error('Routine requires a name and training days');
+    for (const day of days) {
+      if (!day.name.trim() || day.exercises.length === 0) throw new Error('Training day requires a name and exercises');
+      for (const entry of day.exercises) {
+        if (!Number.isInteger(entry.prescribedSets) || entry.prescribedSets < 1
+          || !Number.isFinite(entry.prescribedWeightFirstSet)
+          || !Number.isInteger(entry.prescribedRepsFirstSet) || entry.prescribedRepsFirstSet < 1) {
+          throw new Error('Invalid exercise prescription');
+        }
+      }
+    }
+    await db.withTransactionAsync(async () => {
+      const routine = await db.getFirstAsync<{ id: number }>('SELECT id FROM routines WHERE id = ?', routineId);
+      if (!routine) throw new Error('Routine not found');
+      const existingDays = await db.getAllAsync<{ id: number }>(
+        'SELECT id FROM training_days WHERE routine_id = ?', routineId
+      );
+      const retainedIds = days.flatMap(day => day.id === undefined ? [] : [day.id]);
+      if (new Set(retainedIds).size !== retainedIds.length
+        || retainedIds.some(id => !existingDays.some(day => day.id === id))) {
+        throw new Error('Invalid training day IDs');
+      }
+      await db.runAsync('UPDATE routines SET name = ? WHERE id = ?', name.trim(), routineId);
+      for (const day of existingDays) {
+        if (!retainedIds.includes(day.id)) {
+          await db.runAsync('DELETE FROM day_exercises WHERE training_day_id = ?', day.id);
+          await db.runAsync('DELETE FROM training_days WHERE id = ?', day.id);
+        }
+      }
+      // Free the non-negative positions before assigning the draft's new order.
+      await db.runAsync('UPDATE training_days SET position = -position - 1 WHERE routine_id = ?', routineId);
+      for (let position = 0; position < days.length; position++) {
+        const day = days[position];
+        let dayId = day.id;
+        if (dayId === undefined) {
+          const result = await db.runAsync(
+            'INSERT INTO training_days (name, routine_id, position) VALUES (?, ?, ?)',
+            day.name.trim(), routineId, position
+          );
+          dayId = result.lastInsertRowId;
+        } else {
+          await db.runAsync('UPDATE training_days SET name = ?, position = ? WHERE id = ?', day.name.trim(), position, dayId);
+          await db.runAsync('DELETE FROM day_exercises WHERE training_day_id = ?', dayId);
+        }
+        for (let exercisePosition = 0; exercisePosition < day.exercises.length; exercisePosition++) {
+          const entry = day.exercises[exercisePosition];
+          await db.runAsync(
+            `INSERT INTO day_exercises
+             (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            dayId, entry.id, exercisePosition, entry.prescribedSets,
+            entry.prescribedWeightFirstSet, entry.prescribedRepsFirstSet
+          );
+        }
+      }
+    });
   });
 }
 
