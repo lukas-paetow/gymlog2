@@ -27,6 +27,12 @@ not the plan: do not create logged exercises or sets just because they were pres
 - Snapshot names preserve history. Deleting a referenced day/exercise sets its
   nullable history reference to NULL rather than deleting the logged records.
 
+Library cards have an X button with confirmation. `deleteExercise()` deletes
+day links, then the library row, in a transaction. It retains routines/days even
+if they become empty. Logged exercise names and sets remain; the foreign key
+clears only the library reference. Recreating the same name creates a new library
+identity and does not reconnect old records or PRs.
+
 ## Edit a routine
 
 View → Edit routine opens the existing editor with copies of the saved days and
@@ -138,6 +144,15 @@ restored summary; it cannot accept new sets.
 
 ## Schema and timing
 
+Development Settings can call `seedDemoHistory()` to add 18 dated finished sessions
+for `[Demo] Bench press`, `[Demo] Squat`, and `[Demo] Assisted dips` (three sets each).
+Weights progress every three workouts, with reps increasing at repeated weights.
+The seed includes same-weight rep improvement values and negative assistance.
+It creates a separate demo routine/day/library exercises, preserving existing data.
+One transaction includes the `app_settings.demo_history_v1` marker so retries do
+not duplicate the dataset and a failed seed rolls back. The button is visible only
+in development. Adding demo data requires pressing it; initialization does not seed.
+
 Settings stores a date format with an upsert under `date_format`; missing or invalid
 values fall back to DD/MM/YYYY. Manual formats use local day/month/year fields,
 while System uses `toLocaleDateString()` and the runtime's device locale. History
@@ -147,6 +162,12 @@ strings; date formatting does not change storage or resume-window calculations.
 Initialization creates missing tables, enables foreign keys, and runs
 `migrateFirstSetReps()`. That migration checks columns before adding first-set rep
 targets to existing day/logged exercises, using 8 for existing rows.
+
+Older development databases may still have a non-negative weight CHECK in
+`day_exercises`. After the reps migration, `migrateAssistanceWeights()` detects
+that legacy check and rebuilds only the linking table in a transaction, copying
+its prescriptions and retaining primary/unique/foreign keys. Current schemas
+need no rebuild. Editing CREATE TABLE text alone does not alter existing tables.
 
 Database functions use `measureDb()` to log the duration of the entire async
 operation, including waiting and result handling. Errors propagate and are timed too.

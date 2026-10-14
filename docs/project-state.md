@@ -19,6 +19,8 @@ is desired; it has not been verified. A web interface is deferred.
 
 - Create routines containing ordered training days and exercise prescriptions.
 - Add exercises to the library while building a training day; delete exercises/routines.
+- Library cards offer confirmed deletion, removing plan links while preserving
+  logged names, sessions, and sets. The routine screen refreshes its library on focus.
 - View saved routines and their prescriptions.
 - Open Edit routine from View, change names, add/edit/remove days, and adjust
   day exercises/prescriptions. Save applies the draft atomically; Cancel discards it.
@@ -36,6 +38,8 @@ is desired; it has not been verified. A web interface is deferred.
   MM/DD/YYYY, YYYY-MM-DD, or the device locale. History applies the preference on focus.
 - Display library records: highest logged weight and best reps at that weight.
   Records refresh when the library screen gains focus.
+- Development Settings offers Add demo history: 18 finished workouts, three
+  `[Demo]` exercises, and 162 sets across about eight weeks for plotting experiments.
 
 ## Code map
 

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { getDateFormat, initializeDatabase, setDateFormat } from '../database';
+import { Alert, Button, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { getDateFormat, initializeDatabase, seedDemoHistory, setDateFormat } from '../database';
 import { DATE_FORMATS, DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
 import type { DateFormat } from '../dateFormat';
 
@@ -49,6 +49,25 @@ export default function SettingsScreen() {
     }
   }
 
+  async function addDemoHistory() {
+    if (savingRef.current || isLoading || error) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      const db = await initializeDatabase();
+      const added = await seedDemoHistory(db);
+      Alert.alert(added ? 'Demo history added' : 'Demo history already added',
+        added ? '18 finished workouts are ready in Workout history. Demo exercises are in the library.'
+          : 'This dataset has already been added.');
+    } catch (cause) {
+      console.error('Adding demo history failed:', cause);
+      Alert.alert('Demo data failed', 'Could not add the demo history. Please try again.');
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
+  }
+
   const example = new Date(2026, 10, 23, 12).toISOString();
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -74,6 +93,13 @@ export default function SettingsScreen() {
         </View>
       )}
       {isSaving && <Text>Saving…</Text>}
+      {__DEV__ && (
+        <View style={{ gap: 12, marginTop: 24 }}>
+          <Text style={styles.title}>Demo history</Text>
+          <Text>Add 18 workouts for three demo exercises to explore history and plots.</Text>
+          <Button title="Add demo history" onPress={addDemoHistory} disabled={isLoading || isSaving || error !== null} />
+        </View>
+      )}
     </ScrollView>
   );
 }

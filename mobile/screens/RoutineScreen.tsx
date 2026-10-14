@@ -1,5 +1,6 @@
 import { Alert, Button, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   deleteExercise, deleteRoutine, initializeDatabase, insertExercise, insertRoutine,
@@ -48,8 +49,8 @@ export default function RoutineScreen() {
   // database change
   const [isSaving, setIsSaving] = useState(false);
 
-  // runs after component is mounted ([] empty dependency)
-  useEffect(() => {
+  // Refresh library and routines on return, including deletions from the library screen.
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     initializeDatabase().then(async db => {
       const library = await listExercises(db);
@@ -65,7 +66,7 @@ export default function RoutineScreen() {
     });
     return () => { cancelled = true; };  // if effect callback returns a function, react treats it as cleanup.
                                          // so this is done after unmounting so that no db stuff happens
-  }, []);
+  }, []));
 
   // loading routine to view in detail
   // runs when database or viewedRoutine mounts or changes

@@ -296,6 +296,7 @@ export async function initializeDatabase() {
     await db.execAsync(createLoggedSetTable);
     await db.execAsync(createSettingsTable);
     await migrateFirstSetReps(db);
+    await migrateAssistanceWeights(db);
     return db; // a connection
   });
 }
@@ -632,6 +633,82 @@ export async function insertRoutine(
   });
 }
 
+/** Adds clearly labelled plotting fixtures once, without replacing user data. */
+export async function seedDemoHistory(db: SQLite.SQLiteDatabase): Promise<boolean> {
+  return measureDb('seedDemoHistory', async () => {
+    let added = false;
+    await db.withTransactionAsync(async () => {
+      const marker = await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'demo_history_v1'"
+      );
+      if (marker) return;
+      const definitions = [
+        { name: '[Demo] Bench press', baseWeight: 50, increment: 2.5 },
+        { name: '[Demo] Squat', baseWeight: 70, increment: 5 },
+        { name: '[Demo] Assisted dips', baseWeight: -30, increment: 5 },
+      ];
+      const routine = await db.runAsync('INSERT INTO routines (name) VALUES (?)', '[Demo] Progression');
+      const day = await db.runAsync(
+        'INSERT INTO training_days (name, routine_id, position) VALUES (?, ?, 0)',
+        'Full body', routine.lastInsertRowId
+      );
+      const exerciseIds: number[] = [];
+      for (let position = 0; position < definitions.length; position++) {
+        const definition = definitions[position];
+        const exercise = await db.runAsync('INSERT INTO exercises (name) VALUES (?)', definition.name);
+        exerciseIds.push(exercise.lastInsertRowId);
+        await db.runAsync(
+          `INSERT INTO day_exercises
+           (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset)
+           VALUES (?, ?, ?, 3, ?, 8)`,
+          day.lastInsertRowId, exercise.lastInsertRowId, position, definition.baseWeight
+        );
+      }
+      const previousBests = new Map<string, number>();
+      for (let workout = 0; workout < 18; workout++) {
+        const start = new Date();
+        start.setDate(start.getDate() - ((17 - workout) * 3 + 1));
+        start.setHours(18, 0, 0, 0);
+        const finish = new Date(start.getTime() + 45 * 60 * 1000);
+        const session = await db.runAsync(
+          `INSERT INTO logged_sessions
+           (training_day_id, start_time, finish_time, training_day_name, routine_name)
+           VALUES (?, ?, ?, ?, ?)`,
+          day.lastInsertRowId, start.toISOString(), finish.toISOString(), 'Full body', '[Demo] Progression'
+        );
+        for (let position = 0; position < definitions.length; position++) {
+          const definition = definitions[position];
+          const weight = definition.baseWeight + Math.floor(workout / 3) * definition.increment;
+          const firstSetReps = 8 + workout % 3;
+          const exercise = await db.runAsync(
+            `INSERT INTO logged_exercises
+             (exercise_id, logged_session_id, position, prescribed_sets,
+              prescribed_weight_firstset, prescribed_reps_firstset, exercise_name)
+             VALUES (?, ?, ?, 3, ?, ?, ?)`,
+            exerciseIds[position], session.lastInsertRowId, position, weight, firstSetReps, definition.name
+          );
+          for (let set = 0; set < 3; set++) {
+            const reps = firstSetReps - set;
+            const key = `${exerciseIds[position]}:${weight}`;
+            const previous = previousBests.get(key);
+            const improvement = previous === undefined ? null : Math.max(0, reps - previous);
+            await db.runAsync(
+              `INSERT INTO logged_sets
+               (logged_exercise_id, order_number, reps, weight, rep_pr_improvement, comment)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              exercise.lastInsertRowId, set, reps, weight, improvement, 'Demo data'
+            );
+            previousBests.set(key, Math.max(previous ?? reps, reps));
+          }
+        }
+      }
+      await db.runAsync("INSERT INTO app_settings (key, value) VALUES ('demo_history_v1', 'added')");
+      added = true;
+    });
+    return added;
+  });
+}
+
 /** Updates the plan atomically, retaining existing day IDs and logged snapshots. */
 export async function updateRoutine(
   db: SQLite.SQLiteDatabase,
@@ -729,6 +806,39 @@ async function measureDb<T>(
 
 
 // Share an in-progress migration if multiple screens initialize at once.
+let assistanceMigrationInProgress: Promise<void> | null = null;
+
+/** Removes the legacy non-negative prescription check while preserving plan links. */
+async function migrateAssistanceWeights(db: SQLite.SQLiteDatabase): Promise<void> {
+  if (assistanceMigrationInProgress) return assistanceMigrationInProgress;
+  assistanceMigrationInProgress = measureDb('migrateAssistanceWeights', async () => {
+    await db.withTransactionAsync(async () => {
+      const table = await db.getFirstAsync<{ sql: string }>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'day_exercises'"
+      );
+      if (!table || !/CHECK\s*\(\s*prescribed_weight_firstset\s*>=?\s*0\s*\)/i.test(table.sql)) return;
+
+      await db.execAsync(createDayExercisesTable.replace(
+        'CREATE TABLE IF NOT EXISTS day_exercises',
+        'CREATE TABLE day_exercises_signed_weight'
+      ));
+      await db.execAsync(
+        `INSERT INTO day_exercises_signed_weight
+         (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset)
+         SELECT training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset
+         FROM day_exercises`
+      );
+      await db.execAsync('DROP TABLE day_exercises');
+      await db.execAsync('ALTER TABLE day_exercises_signed_weight RENAME TO day_exercises');
+    });
+  });
+  try {
+    await assistanceMigrationInProgress;
+  } finally {
+    assistanceMigrationInProgress = null;
+  }
+}
+
 let repsMigrationInProgress: Promise<void> | null = null;
 
 async function migrateFirstSetReps(db: SQLite.SQLiteDatabase): Promise<void> {
