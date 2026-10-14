@@ -82,11 +82,16 @@ the active screen's save guard.
 
 ## Verification and documentation
 
-From `mobile/`, run `npx tsc --noEmit` and `npm run docs`.
+[testing.md](testing.md) defines the PC-only test strategy, behavior inventory,
+and a 100% code-coverage target. Jest/Expo, a real SQLite test adapter, and screen
+tests are installed; `npm run check` checks types and enforced coverage floors.
+
+From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. No project test or lint scripts are configured. Previous
-feature checks used temporary SQLite checks and mocked screen handlers; these
-are not a committed test suite. Device interaction still needs manual testing.
+are ignored by Git. The repository suite has 97 tests; its initial run reached
+99.71% line coverage and 91.24% branch coverage, with full measured database/date
+coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
+script is configured. Native Android interaction still needs emulator testing.
 
 Keep this file and [workout-flow.md](workout-flow.md) current when behavior changes.
 Use brief `/** ... */` comments for function contracts rather than documenting

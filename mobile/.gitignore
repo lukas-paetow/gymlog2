@@ -38,6 +38,7 @@ yarn-error.*
 
 # generated documentation
 docs/api/
+coverage/
 
 # generated native folders
 /ios
