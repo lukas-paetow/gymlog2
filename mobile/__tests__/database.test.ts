@@ -30,10 +30,6 @@ async function plan() {
   const sessionId = await database.createLoggedSession(fixture.db, day.id);
   return { routineId, day, exercise, sessionId };
 }
-function legacy() {
-  connect();
-  fixture.connection.exec(readFileSync(join(__dirname, 'fixtures/legacy.sql'), 'utf8'));
-}
 function count(table: string) {
   return (fixture.connection.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
 }
@@ -49,7 +45,29 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-describe('initialization and historical migrations', () => {
+describe('initialization and current baseline', () => {
+  test('initializes the frozen current baseline without losing saved rows', async () => {
+    connect();
+    fixture.connection.exec(readFileSync(join(__dirname, 'fixtures/baseline-2026-10-15.sql'), 'utf8'));
+    fixture.connection.exec(`
+      INSERT INTO routines VALUES (1, 'Baseline routine');
+      INSERT INTO exercises VALUES (1, 'Assisted dips');
+      INSERT INTO training_days VALUES (1, 'Baseline day', 1, 0);
+      INSERT INTO day_exercises VALUES (1, 1, 0, 3, -20, 10);
+      INSERT INTO logged_sessions VALUES (1, 1, '2026-10-01T10:00:00.000Z', NULL, 'Baseline day', 'Baseline routine');
+      INSERT INTO logged_exercises (id, exercise_id, logged_session_id, position, prescribed_sets, exercise_name)
+      VALUES (1, 1, 1, 0, 3, 'Assisted dips');
+      INSERT INTO logged_sets (logged_exercise_id, order_number, reps, weight) VALUES (1, 0, 10, -20);
+    `);
+    await database.initializeDatabase();
+    await database.initializeDatabase();
+    expect((await database.listExercisesInTrainingDay(fixture.db, 1))[0]).toMatchObject({
+      prescribedWeightFirstSet: -20, prescribedRepsFirstSet: 10,
+    });
+    expect((await database.listSavedSessionSets(fixture.db, 1))[0]).toMatchObject({ reps: 10, weight: -20 });
+    expect(fixture.connection.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
   test('creates a fresh database with foreign keys and accepts negative prescriptions', async () => {
     await database.initializeDatabase();
     expect(count('routines')).toBe(0);
@@ -58,53 +76,6 @@ describe('initialization and historical migrations', () => {
     expect(exercise.prescribedWeightFirstSet).toBe(-20);
   });
 
-  test('migrates a frozen legacy database, preserving history and allowing assistance', async () => {
-    legacy();
-    expect(() => fixture.connection.exec('UPDATE day_exercises SET prescribed_weight_firstset = -10')).toThrow();
-    await database.initializeDatabase();
-    await database.initializeDatabase();
-    fixture.connection.exec('UPDATE day_exercises SET prescribed_weight_firstset = -10');
-    const [exercise] = await database.listExercisesInTrainingDay(fixture.db, 1);
-    expect(exercise).toMatchObject({ name: 'Dips', prescribedRepsFirstSet: 8, prescribedWeightFirstSet: -10 });
-    expect((await database.listSavedSessionSets(fixture.db, 1))[0]).toMatchObject({ reps: 8, weight: 20 });
-    expect(fixture.connection.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-  });
-
-  test('concurrent initialization shares in-progress migrations', async () => {
-    legacy();
-    await Promise.all([database.initializeDatabase(), database.initializeDatabase()]);
-    expect(count('logged_sets')).toBe(1);
-    fixture.connection.exec('UPDATE day_exercises SET prescribed_weight_firstset = -5');
-  });
-
-  test('failed weight migration rolls back its rebuild and can be retried', async () => {
-    legacy();
-    const execute = fixture.adapter.execAsync.bind(fixture.adapter);
-    const spy = jest.spyOn(fixture.adapter, 'execAsync').mockImplementation(async sql => {
-      if (sql.includes('INSERT INTO day_exercises_signed_weight')) throw new Error('copy failed');
-      await execute(sql);
-    });
-    await expect(database.initializeDatabase()).rejects.toThrow('copy failed');
-    expect(count('day_exercises')).toBe(1);
-    expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE name = 'day_exercises_signed_weight'").get()).toBeUndefined();
-    spy.mockRestore();
-    await database.initializeDatabase();
-    fixture.connection.exec('UPDATE day_exercises SET prescribed_weight_firstset = -5');
-  });
-
-  test('failed reps migration rolls back both column additions and retries', async () => {
-    legacy();
-    const execute = fixture.adapter.execAsync.bind(fixture.adapter);
-    const spy = jest.spyOn(fixture.adapter, 'execAsync').mockImplementation(async sql => {
-      if (sql.includes('ALTER TABLE logged_exercises ADD COLUMN')) throw new Error('alter failed');
-      await execute(sql);
-    });
-    await expect(database.initializeDatabase()).rejects.toThrow('alter failed');
-    expect(fixture.connection.prepare('PRAGMA table_info(day_exercises)').all().some(row => row.name === 'prescribed_reps_firstset')).toBe(false);
-    spy.mockRestore();
-    await database.initializeDatabase();
-    expect((await database.listExercisesInTrainingDay(fixture.db, 1))[0].prescribedRepsFirstSet).toBe(8);
-  });
 });
 
 describe('plans and deletion', () => {
@@ -237,7 +208,7 @@ describe('logging, records, and history', () => {
     expect((await database.listFinishedWorkouts(fixture.db))[0].sets[0]).toMatchObject({ exerciseName: 'Dips', reps: 8, weight: -20 });
   });
 
-  test('history keeps empty sessions, snapshot names, and session/exercise/set order', async () => {
+  test('history excludes empty sessions and preserves snapshot names and set order', async () => {
     const { exercise, day, sessionId } = await plan();
     await database.saveCompletedSet(fixture.db, sessionId, exercise, 3, 1, 6, -10);
     await database.saveCompletedSet(fixture.db, sessionId, exercise, 3, 0, 8, -10);
@@ -246,10 +217,19 @@ describe('logging, records, and history', () => {
     await database.finishLoggedSession(fixture.db, empty);
     await database.deleteExercise(fixture.db, exercise.id);
     const history = await database.listFinishedWorkouts(fixture.db);
-    expect(history.map(row => row.id)).toEqual([empty, sessionId]);
-    expect(history[0].sets).toEqual([]);
-    expect(history[1].sets.map(row => row.setPosition)).toEqual([0, 1]);
-    expect(history[1].sets[0].exerciseName).toBe('Dips');
+    expect(history.map(row => row.id)).toEqual([sessionId]);
+    expect(history[0].sets.map(row => row.setPosition)).toEqual([0, 1]);
+    expect(history[0].sets[0].exerciseName).toBe('Dips');
+  });
+
+  test('finishing without performed sets closes the session without creating history', async () => {
+    const { sessionId } = await plan();
+    await database.finishLoggedSession(fixture.db, sessionId);
+    expect((await database.getLoggedSession(fixture.db, sessionId))?.finishTime).not.toBeNull();
+    expect(await database.getResumableSession(fixture.db)).toBeNull();
+    expect(await database.listFinishedWorkouts(fixture.db)).toEqual([]);
+    expect(count('logged_exercises')).toBe(0);
+    expect(count('logged_sets')).toBe(0);
   });
 
   test('resume returns only the latest eligible unfinished session within six hours', async () => {

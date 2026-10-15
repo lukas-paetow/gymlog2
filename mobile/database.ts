@@ -295,8 +295,6 @@ export async function initializeDatabase() {
     await db.execAsync(createLoggedExerciseTable);
     await db.execAsync(createLoggedSetTable);
     await db.execAsync(createSettingsTable);
-    await migrateFirstSetReps(db);
-    await migrateAssistanceWeights(db);
     return db; // a connection
   });
 }
@@ -465,7 +463,7 @@ export async function finishLoggedSession(db: SQLite.SQLiteDatabase, sessionId: 
   });
 }
 
-/** Loads finished workouts and performed sets, preserving snapshot names and empty workouts. */
+/** Loads finished workouts with at least one performed set, preserving snapshot names. */
 export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<FinishedWorkout[]> {
   return measureDb('listFinishedWorkouts', async () => {
     const rows = await db.getAllAsync<{
@@ -473,19 +471,19 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
       trainingDayName: string;
       routineName: string;
       finishTime: string;
-      setId: number | null;
-      exerciseName: string | null;
-      setPosition: number | null;
+      setId: number;
+      exerciseName: string;
+      setPosition: number;
       weight: number | null;
-      reps: number | null;
+      reps: number;
     }>(
       `SELECT logged_sessions.id AS sessionId,
               training_day_name AS trainingDayName, routine_name AS routineName,
               finish_time AS finishTime, logged_sets.id AS setId,
               exercise_name AS exerciseName, order_number AS setPosition, weight, reps
        FROM logged_sessions
-       LEFT JOIN logged_exercises ON logged_exercises.logged_session_id = logged_sessions.id
-       LEFT JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
+       JOIN logged_exercises ON logged_exercises.logged_session_id = logged_sessions.id
+       JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
        WHERE finish_time IS NOT NULL
        ORDER BY finish_time DESC, logged_sessions.id DESC, logged_exercises.position, order_number, logged_sets.id`
     );
@@ -499,12 +497,10 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
         };
         workouts.set(row.sessionId, workout);
       }
-      if (row.setId !== null && row.exerciseName !== null && row.setPosition !== null && row.reps !== null) {
-        workout.sets.push({
-          id: row.setId, exerciseName: row.exerciseName, setPosition: row.setPosition,
-          weight: row.weight, reps: row.reps,
-        });
-      }
+      workout.sets.push({
+        id: row.setId, exerciseName: row.exerciseName, setPosition: row.setPosition,
+        weight: row.weight, reps: row.reps,
+      });
     }
     return Array.from(workouts.values());
   });
@@ -803,75 +799,3 @@ async function measureDb<T>(
         );
     }
 }
-
-
-// Share an in-progress migration if multiple screens initialize at once.
-let assistanceMigrationInProgress: Promise<void> | null = null;
-
-/** Removes the legacy non-negative prescription check while preserving plan links. */
-async function migrateAssistanceWeights(db: SQLite.SQLiteDatabase): Promise<void> {
-  if (assistanceMigrationInProgress) return assistanceMigrationInProgress;
-  assistanceMigrationInProgress = measureDb('migrateAssistanceWeights', async () => {
-    await db.withTransactionAsync(async () => {
-      const table = await db.getFirstAsync<{ sql: string }>(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'day_exercises'"
-      );
-      if (!table || !/CHECK\s*\(\s*prescribed_weight_firstset\s*>=?\s*0\s*\)/i.test(table.sql)) return;
-
-      await db.execAsync(createDayExercisesTable.replace(
-        'CREATE TABLE IF NOT EXISTS day_exercises',
-        'CREATE TABLE day_exercises_signed_weight'
-      ));
-      await db.execAsync(
-        `INSERT INTO day_exercises_signed_weight
-         (training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset)
-         SELECT training_day_id, exercise_id, position, prescribed_sets, prescribed_weight_firstset, prescribed_reps_firstset
-         FROM day_exercises`
-      );
-      await db.execAsync('DROP TABLE day_exercises');
-      await db.execAsync('ALTER TABLE day_exercises_signed_weight RENAME TO day_exercises');
-    });
-  });
-  try {
-    await assistanceMigrationInProgress;
-  } finally {
-    assistanceMigrationInProgress = null;
-  }
-}
-
-let repsMigrationInProgress: Promise<void> | null = null;
-
-async function migrateFirstSetReps(db: SQLite.SQLiteDatabase): Promise<void> {
-  if (repsMigrationInProgress) return repsMigrationInProgress;
-
-  repsMigrationInProgress = measureDb('migrateFirstSetReps', async () => {
-    await db.withTransactionAsync(async () => {
-      const dayColumns = await db.getAllAsync<{ name: string }>(
-        'PRAGMA table_info(day_exercises)'
-      );
-      if (!dayColumns.some(column => column.name === 'prescribed_reps_firstset')) {
-        await db.execAsync(
-          `ALTER TABLE day_exercises ADD COLUMN prescribed_reps_firstset
-           INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1)`
-        );
-      }
-
-      const loggedColumns = await db.getAllAsync<{ name: string }>(
-        'PRAGMA table_info(logged_exercises)'
-      );
-      if (!loggedColumns.some(column => column.name === 'prescribed_reps_firstset')) {
-        await db.execAsync(
-          `ALTER TABLE logged_exercises ADD COLUMN prescribed_reps_firstset
-           INTEGER NOT NULL DEFAULT 8 CHECK (prescribed_reps_firstset >= 1)`
-        );
-      }
-    });
-  });
-
-  try {
-    await repsMigrationInProgress;
-  } finally {
-    repsMigrationInProgress = null;
-  }
-}
-

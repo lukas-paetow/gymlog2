@@ -11,10 +11,10 @@ Target **100% statements, branches, functions, and lines** in our TypeScript cod
 Coverage means code executed during tests, not proof that every possible input,
 device behavior, or bug has been checked. Tests must assert useful outcomes.
 
-The runner and coverage reports are now configured. There are 97 repository tests
+The runner and coverage reports are now configured. There are 96 repository tests
 across database, date formatting, screen interactions, navigation, and bootstrap.
-The last full run measured 99.71% lines, 97.15% statements, 98.28% functions, and
-91.24% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
+The last full run measured 99.69% lines, 97.29% statements, 99.11% functions, and
+91.54% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
 Re-run coverage after changes; these numbers are a baseline, not a permanent claim.
 Native Android behavior still requires the emulator checks below.
 
@@ -66,6 +66,9 @@ or native module internals. Those need explicit database and emulator assertions
 
 ## Database test strategy
 
+See [schema-history.md](schema-history.md) for frozen schemas and how to use the
+current baseline when adding future migrations.
+
 Import and call the actual exported database functions. Do not copy their SQL or
 extract function bodies into a parallel implementation. Replace only the native
 module boundary with a real SQLite-backed adapter; mocked query results alone
@@ -76,29 +79,29 @@ and reopen a temporary file. Use fixed clocks for dates, resume windows, and dem
 history. Ensure cleanup even after a failure. Never run automated tests against
 the user's `gymlog.db`; native tests need an isolated database or a dedicated test
 emulator. The tests replace `openDatabaseAsync` with an isolated test connection; production
-initialization and migrations run unchanged. The adapter executes SQL with
+initialization runs unchanged. The adapter executes SQL with
 `node:sqlite`, including transactions and foreign keys. Screen tests mock database
 responses and native controls to exercise UI behavior separately.
 
-The fixture `mobile/__tests__/fixtures/legacy.sql` freezes a pre-reps schema
-including the old non-negative weight CHECK.
-Do not derive every old schema from today's table strings: that could silently
-erase the migration case when source changes. Test migration through initialization,
-including repeated runs and preservation of saved data. Keep native transaction
-and concurrent-call checks because the desktop adapter cannot prove Expo behavior.
+The frozen `baseline-2026-10-15.sql` represents the currently supported schema.
+The pre-baseline fixture and migrations have been retired together. For future
+schema changes, add migration tests against this fixed baseline, including repeat
+runs, rollback, and data preservation. Do not regenerate an old fixture from the
+new schema. Keep native transaction and concurrent-call checks because the desktop
+adapter cannot prove Expo behavior.
 
 ## Initial behavior inventory
 
 | Area | Required cases |
 | --- | --- |
-| Initialization/migrations | Fresh database; old schema missing reps; old weight CHECK; existing rows/history preserved; repeated and concurrent initialization; injected failure rolls back and permits retry. |
+| Initialization/migrations | Fresh database; current baseline rows/history preserved; repeated initialization. For future migrations: old-to-new upgrade, concurrent calls, rollback, and retry. |
 | Exercises | Insert/list ordering; delete library and plan links while keeping snapshots/sets; empty lists and database failures. |
 | Routines | Create/edit/delete; validation; retain existing day IDs; add/remove/reorder days; reject foreign/duplicate day IDs; partial-write rollback; history unchanged. |
 | Set saving | First set creates its logged exercise; later sets reuse it; retry does not duplicate; missing/finished sessions rejected; invalid reps/positions/nonfinite weight; zero and negative weight accepted; failure leaves no partial records. |
 | PRs | No baseline; equal/lower/higher reps at same weight; different weights excluded; earlier sets in same session; correct reps at highest weight; negative and zero weights; missing records. |
 | Finishing | Finish time stored; retry retains timestamp; nonexistent session fails; save failure keeps UI active; repeated presses and save/finish overlap blocked. |
 | Resume | Newest eligible session only; six-hour boundary, just older, future timestamp, finished session, no session; snapshots override plan edits; restore set values/order; next row editable; deleted day/exercise; no duplicate sets after resume. |
-| History | Finished only; newest first; multiple sessions/exercises/sets; empty workouts; snapshot names survive deletion; correct exercise/set order; nullable weights. |
+| History | Finished only; newest first; multiple sessions/exercises/sets; exclude empty workouts; snapshot names survive deletion; correct exercise/set order; nullable weights. |
 | Settings/dates | Missing/invalid preference defaults to DD/MM/YYYY; valid formats persist; System delegates to locale; local midnight rollover/leap day; save failures do not change selected preference. |
 | Demo data | Counts/dates/progression; assistance and PR values; preserve existing data; repeated call adds nothing; rollback leaves no marker or partial rows. |
 | Timing | Duration logged after success and failure; return values/errors preserved. |
@@ -130,8 +133,8 @@ Use isolated test data and check these journeys after relevant changes:
    and date, and the finished workout is no longer offered for Resume.
 5. Change date format, restart, and verify persistence and history display.
 6. Delete a library exercise; check plan removal and unchanged history.
-7. Upgrade a dedicated legacy database fixture; negative prescriptions work and
-   the saved rows survive. Re-run initialization.
+7. Load the current baseline on a dedicated test emulator; negative prescriptions
+   work and rows survive reinitialization. Add native upgrade checks with future migrations.
 8. Check slider dragging, number/decimal/minus entry, scrolling, long-press popup,
    modal closing/back button, and long names at a larger system font size.
 
@@ -151,13 +154,18 @@ Use `npm run docs` to regenerate TypeDoc. The installed test scripts are:
 
 Test layout: `mobile/__tests__/database.test.ts` calls production database functions
 through `support/sqlite.ts`; `dateFormat.test.ts` checks formatting; `screens.test.tsx`
-checks interactions and delayed/failed operations; `navigation.test.tsx` checks
-route registration; `bootstrap.test.ts` checks Expo root registration.
+checks interactions and delayed/failed operations; `navigation.integration.test.tsx` renders the real App and
+navigator to check History/Back and start/finish/Done journeys, session parameters,
+and focus reload on return; `bootstrap.test.ts` checks Expo root registration.
 
 Open `mobile/coverage/lcov-report/index.html` after a coverage run and click a file
-to inspect missing branches. Screen tests currently simulate focus through a
-mounted effect, so actual navigation focus cycles and native slider behavior are
-not proven by their coverage. Remaining gaps include defensive guards and some
+to inspect missing branches. Isolated screen tests simulate focus through a mounted effect. The navigation
+integration suite uses real React Navigation and app screens, with mocked data,
+safe-area metrics, and slider rendering. It verifies visible routes, passes a
+Back signal to the real navigation subscription (the native header button is not
+a JavaScript child), and checks focus reload after finishing. Native header
+rendering, physical Back delivery, gestures, and slider behavior still need emulator
+checks. See [React Navigation testing guidance](https://reactnavigation.org/docs/testing/). Remaining gaps include defensive guards and some
 UI lifecycle/selection branches. Work toward 100% with meaningful behavior tests,
 without hiding code or directly invoking private handlers just for percentages.
 Native emulator checks remain separate from the automated suite and were not run

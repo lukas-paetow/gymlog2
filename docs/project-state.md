@@ -32,7 +32,7 @@ is desired; it has not been verified. A web interface is deferred.
   divider separating completed and remaining exercises.
 - Long-press an exercise header with no completed sets to reveal Skip.
 - Confirm Finish workout, save its finish time, and show a summary modal.
-- Browse finished workouts from Home, newest first, with local finish dates (without time) and
+- Browse finished workouts with at least one saved set from Home, newest first, with local finish dates (without time) and
   tables of exercise names, weight, and reps for each saved set.
 - Settings offers persistent date display formats: DD/MM/YYYY (default),
   MM/DD/YYYY, YYYY-MM-DD, or the device locale. History applies the preference on focus.
@@ -46,7 +46,7 @@ is desired; it has not been verified. A web interface is deferred.
 | File | Responsibility |
 | --- | --- |
 | [App.tsx](../mobile/App.tsx) | Navigation routes and route parameter types. |
-| [database.ts](../mobile/database.ts) | Domain types, schema, migration, queries, writes, and timing. |
+| [database.ts](../mobile/database.ts) | Domain types, schema, queries, writes, and timing. |
 | [RoutineScreen.tsx](../mobile/screens/RoutineScreen.tsx) | Routine/day drafts, creation, editing, viewing, and deletion. |
 | [SessionScreen.tsx](../mobile/screens/SessionScreen.tsx) | Day selection, session creation, and navigation to the workout. |
 | [ActiveSessionScreen.tsx](../mobile/screens/ActiveSessionScreen.tsx) | Workout inputs, saving sets, completion/skip state, and finish summary. |
@@ -88,8 +88,8 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 97 tests; its initial run reached
-99.71% line coverage and 91.24% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 96 tests; the latest run reached
+99.69% line coverage and 91.54% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 

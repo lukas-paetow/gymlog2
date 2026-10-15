@@ -116,7 +116,9 @@ Done returns to workout selection. Unfinished sets are never automatically logge
 Home links to Workout history. On focus, `listFinishedWorkouts()` loads only
 sessions with a finish time, newest first, joining saved exercises and sets in
 one query. Snapshot names preserve display after template/library deletion.
-LEFT JOINs keep finished sessions without sets visible. The function groups rows
+INNER JOINs require at least one saved set; empty finished sessions stay out of
+history, including ones created before this rule. Finishing still closes those
+sessions so they are not offered for resume. The function groups rows
 into session objects with set arrays. Each card shows the routine and smaller day name on one line, with the local
 finish date on the right (no time), and one table row per set: exercise (with set number), weight in kg, and reps.
 
@@ -159,15 +161,11 @@ while System uses `toLocaleDateString()` and the runtime's device locale. Histor
 reloads the preference on focus. All stored session timestamps remain UTC ISO
 strings; date formatting does not change storage or resume-window calculations.
 
-Initialization creates missing tables, enables foreign keys, and runs
-`migrateFirstSetReps()`. That migration checks columns before adding first-set rep
-targets to existing day/logged exercises, using 8 for existing rows.
-
-Older development databases may still have a non-negative weight CHECK in
-`day_exercises`. After the reps migration, `migrateAssistanceWeights()` detects
-that legacy check and rebuilds only the linking table in a transaction, copying
-its prescriptions and retaining primary/unique/foreign keys. Current schemas
-need no rebuild. Editing CREATE TABLE text alone does not alter existing tables.
+Initialization creates missing tables and enables foreign keys. The old first-set
+reps and signed-weight migrations are retired; fresh databases and the frozen
+current baseline are supported. See [schema-history.md](schema-history.md).
+Future schema changes need explicit migrations: CREATE TABLE IF NOT EXISTS alone
+does not update existing tables.
 
 Database functions use `measureDb()` to log the duration of the entire async
 operation, including waiting and result handling. Errors propagate and are timed too.
