@@ -7,6 +7,8 @@ import type { DayExerciseDraft, TrainingDayDraft, TrainingDayExercise } from '..
 import type { DateFormat } from '../dateFormat';
 import { createTestDatabase } from './support/sqlite';
 
+
+// create mock opener and connection
 jest.mock('expo-sqlite', () => ({ openDatabaseAsync: jest.fn() }));
 const open = jest.mocked(openDatabaseAsync);
 let fixture: ReturnType<typeof createTestDatabase>;
@@ -18,6 +20,8 @@ function connect(path?: string) {
   open.mockResolvedValue(fixture.db);
   return fixture;
 }
+
+// create data for tests
 const prescription = (id: number, overrides: Partial<DayExerciseDraft> = {}): DayExerciseDraft => ({
   id, prescribedSets: 3, prescribedRepsFirstSet: 8, prescribedWeightFirstSet: -20, ...overrides,
 });
@@ -30,15 +34,18 @@ async function plan() {
   const sessionId = await database.createLoggedSession(fixture.db, day.id);
   return { routineId, day, exercise, sessionId };
 }
+
+// count database rows for checking
 function count(table: string) {
   return (fixture.connection.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
 }
 
-beforeEach(async () => {
+// watch functions
+beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   connect();
-  await database.initializeDatabase();
 });
+// cleanup
 afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
   jest.restoreAllMocks();
@@ -47,7 +54,6 @@ afterEach(() => {
 
 describe('initialization and current baseline', () => {
   test('initializes the frozen current baseline without losing saved rows', async () => {
-    connect();
     fixture.connection.exec(readFileSync(join(__dirname, 'fixtures/baseline-2026-10-15.sql'), 'utf8'));
     fixture.connection.exec(`
       INSERT INTO routines VALUES (1, 'Baseline routine');
@@ -60,7 +66,6 @@ describe('initialization and current baseline', () => {
       INSERT INTO logged_sets (logged_exercise_id, order_number, reps, weight) VALUES (1, 0, 10, -20);
     `);
     await database.initializeDatabase();
-    await database.initializeDatabase();
     expect((await database.listExercisesInTrainingDay(fixture.db, 1))[0]).toMatchObject({
       prescribedWeightFirstSet: -20, prescribedRepsFirstSet: 10,
     });
@@ -69,16 +74,37 @@ describe('initialization and current baseline', () => {
   });
 
   test('creates a fresh database with foreign keys and accepts negative prescriptions', async () => {
+    expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).toEqual([]);
     await database.initializeDatabase();
+    expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(row => row.name)).toEqual([
+      'app_settings', 'day_exercises', 'exercises', 'logged_exercises',
+      'logged_sessions', 'logged_sets', 'routines', 'training_days',
+    ]);
     expect(count('routines')).toBe(0);
     expect(fixture.connection.prepare('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 });
     const { exercise } = await plan();
     expect(exercise.prescribedWeightFirstSet).toBe(-20);
   });
 
+  test('repeated initialization preserves all existing rows and settings', async () => {
+    await database.initializeDatabase();
+    const { exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.setDateFormat(fixture.db, 'YYYY-MM-DD');
+    const tables = ['routines', 'exercises', 'training_days', 'day_exercises',
+      'logged_sessions', 'logged_exercises', 'logged_sets', 'app_settings'];
+    const snapshot = () => Object.fromEntries(tables.map(table => [
+      table, fixture.connection.prepare(`SELECT * FROM ${table}`).all(),
+    ]));
+    const before = snapshot();
+    await database.initializeDatabase();
+    expect(snapshot()).toEqual(before);
+    expect(fixture.connection.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
 });
 
 describe('plans and deletion', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
   test('lists exercise names alphabetically without case sensitivity', async () => {
     await database.insertExercise(fixture.db, 'zebra');
     await database.insertExercise(fixture.db, 'Alpha');
@@ -148,6 +174,7 @@ describe('plans and deletion', () => {
 });
 
 describe('logging, records, and history', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
   test('creates the exercise only with a saved set, preserves order and ignores a retry', async () => {
     const { exercise, sessionId } = await plan();
     expect(count('logged_exercises')).toBe(0);
@@ -251,6 +278,7 @@ describe('logging, records, and history', () => {
 });
 
 describe('settings and demo fixtures', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
   test('date settings default, validate, upsert, and survive closing/reopening', async () => {
     expect(await database.getDateFormat(fixture.db)).toBe('DD/MM/YYYY');
     await fixture.db.runAsync("INSERT INTO app_settings VALUES ('date_format', 'bad')");

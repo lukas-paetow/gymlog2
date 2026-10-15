@@ -1,5 +1,5 @@
 # gymlog2
-Full-stack mobile application for tracking my workouts. Written in TypeScript and making use of ReactNative and SQLite, >95% test coverage. To be used on my android phone. The plan is to make planning routines, logging them in the gym, and plotting the data as easy as possible.
+Full-stack mobile application for tracking my workouts. Written in TypeScript and making use of ReactNative, SQLite and Expo. >95% test coverage. To be used on my android phone. The plan is to make planning routines, logging them in the gym, and plotting the data as easy as possible.
 
 ## Local documentation
 

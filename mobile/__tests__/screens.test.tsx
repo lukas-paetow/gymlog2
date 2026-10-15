@@ -81,6 +81,7 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
+// Lower priority: checks requested route names; real journeys have integration tests.
 test('Home links to all task screens', async () => {
   await render(<StartScreen {...props<Parameters<typeof StartScreen>[0]>('Start')} />);
   for (const [title, route] of [['Exercise library', 'ExerciseLibrary'], ['Routines ', 'Routines'], ['Start Workout Session', 'Session'], ['Workout history', 'WorkoutHistory'], ['Settings', 'Settings']]) {
@@ -90,6 +91,7 @@ test('Home links to all task screens', async () => {
 });
 
 describe('library and history', () => {
+  // Lower priority: checks only a low-risk empty-state message.
   test('library empty state and record display', async () => {
     await render(<ExerciseLibraryScreen />);
     await screen.findByText(/No exercises yet/);
@@ -121,6 +123,7 @@ describe('library and history', () => {
   test('history shows finished dates and rows, including empty workouts and null weights', async () => {
     db.listFinishedWorkouts.mockResolvedValue([
       { id: 1, trainingDayName: 'Day', routineName: 'Routine', finishTime: '2026-11-23T12:00:00.000Z', sets: [{ id: 10, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 8 }, { id: 11, exerciseName: 'Dips', setPosition: 1, weight: null, reps: 6 }] },
+      // Lower priority: defensive UI fallback; the real history query excludes empty workouts.
       { id: 2, trainingDayName: 'Empty', routineName: 'Routine', finishTime: '2026-11-22T12:00:00.000Z', sets: [] },
     ]);
     await render(<WorkoutHistoryScreen />);
@@ -129,6 +132,7 @@ describe('library and history', () => {
     expect(screen.getByText('—')).toBeTruthy();
     expect(screen.getByText('No sets completed.')).toBeTruthy();
   });
+  // Lower priority: checks only a low-risk empty-state message.
   test('history handles empty data', async () => {
     await render(<WorkoutHistoryScreen />);
     await screen.findByText('No finished workouts yet.');
@@ -422,6 +426,8 @@ describe('routine drafts', () => {
 });
 
 describe('async lifecycle and remaining user paths', () => {
+  // Lower priority: repetitive lifecycle smoke checks. The assertion checks no late
+  // alert, not whether every possible state update is suppressed after unmounting.
   test.each(['library', 'history', 'settings', 'session', 'active', 'routine'] as const)(
     '%s safely ignores a load that finishes after leaving the screen', async target => {
       const pending = deferred<Awaited<ReturnType<typeof database.initializeDatabase>>>();
@@ -523,6 +529,7 @@ describe('async lifecycle and remaining user paths', () => {
   });
 });
 
+// Lower priority than persistence tests: repeated per-screen checks of late error feedback.
 test.each(['library', 'history', 'settings', 'session', 'active', 'routine'] as const)(
   '%s suppresses user-facing load errors after leaving the screen', async target => {
     const pending = deferred<Awaited<ReturnType<typeof database.initializeDatabase>>>();

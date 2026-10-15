@@ -11,7 +11,7 @@ Target **100% statements, branches, functions, and lines** in our TypeScript cod
 Coverage means code executed during tests, not proof that every possible input,
 device behavior, or bug has been checked. Tests must assert useful outcomes.
 
-The runner and coverage reports are now configured. There are 96 repository tests
+The runner and coverage reports are now configured. There are 97 repository tests
 across database, date formatting, screen interactions, navigation, and bootstrap.
 The last full run measured 99.69% lines, 97.29% statements, 99.11% functions, and
 91.54% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
