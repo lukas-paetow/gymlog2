@@ -1,10 +1,13 @@
-import { Alert, Button, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Button, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useCallback, useRef, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../App';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { deleteExercise, initializeDatabase, listExercisesWithRecords } from '../database';
 import type { ExerciseWithRecord } from '../database';
 
 export default function ExerciseLibraryScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [exercises, setExercises] = useState<ExerciseWithRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +69,12 @@ export default function ExerciseLibraryScreen() {
         <>
           {exercises.length === 0 && <Text>No exercises yet. Add one when creating a routine.</Text>}
           {exercises.map(exercise => (
-            <View key={exercise.id} style={styles.card}>
+            <Pressable key={exercise.id} style={styles.card} accessibilityRole="button"
+              accessibilityLabel={`View progress for ${exercise.name}`}
+              accessibilityHint="Hold to open exercise progress"
+              accessibilityActions={[{ name: 'activate', label: 'View progress' }]}
+              onAccessibilityAction={() => navigation.navigate('Progress', { exerciseId: exercise.id, exerciseName: exercise.name })}
+              onLongPress={() => navigation.navigate('Progress', { exerciseId: exercise.id, exerciseName: exercise.name })}>
               <View style={styles.cardHeader}>
                 <Text style={styles.name}>{exercise.name}</Text>
                 <Button title="X" accessibilityLabel={`Delete ${exercise.name}`} color="#b91c1c"
@@ -77,7 +85,7 @@ export default function ExerciseLibraryScreen() {
                   <Text>Personal Record: {exercise.heaviestWeight} kg / {exercise.repsAtHeaviestWeight} reps</Text>
                 </>
               )}
-            </View>
+            </Pressable>
           ))}
         </>
       )}

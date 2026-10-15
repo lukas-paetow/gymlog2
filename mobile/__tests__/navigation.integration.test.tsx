@@ -12,6 +12,7 @@ jest.mock('@react-native-community/slider', () => {
   return (props: object) => React.createElement(require('react-native').View, props);
 });
 jest.mock('../database', () => ({
+  listExercisesWithRecords: jest.fn(), listExerciseProgress: jest.fn(),
   initializeDatabase: jest.fn(), listFinishedWorkouts: jest.fn(), getDateFormat: jest.fn(),
   getResumableSession: jest.fn(), listRoutines: jest.fn(), listTrainingDays: jest.fn(),
   createLoggedSession: jest.fn(), getLoggedSession: jest.fn(), listSavedSessionSets: jest.fn(),
@@ -72,4 +73,19 @@ test('Start → ActiveSession → Finish → Done uses real routing and session 
   expect(await screen.findByRole('button', { name: 'Start workout' })).toBeVisible();
   expect(screen.queryByText('Workout finished')).toBeNull();
   await waitFor(() => expect(db.getResumableSession).toHaveBeenCalledTimes(2));
+});
+
+
+test('Library → Progress → Back reloads exercise records on returning', async () => {
+  db.listExercisesWithRecords.mockResolvedValue([{ id: 7, name: 'Squat', heaviestWeight: 80, repsAtHeaviestWeight: 8 }]);
+  db.listExerciseProgress.mockResolvedValue([]);
+  await render(<App />);
+  await fireEvent.press(screen.getByRole('button', { name: 'Exercise library' }));
+  await fireEvent(await screen.findByRole('button', { name: 'View progress for Squat' }), 'longPress');
+  expect(await screen.findByText('No finished workouts with a recorded weight yet.')).toBeVisible();
+  const listener = backEvents.mock.calls.filter(([event]) => event === 'hardwareBackPress').at(-1)?.[1];
+  await act(async () => { expect(listener()).toBe(true); });
+  await waitFor(() => expect(db.listExercisesWithRecords).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole('button', { name: 'View progress for Squat' })).toBeVisible();
+  expect(screen.queryByText('Could not load exercise records.')).toBeNull();
 });

@@ -36,10 +36,22 @@ is desired; it has not been verified. A web interface is deferred.
   tables of exercise names, weight, and reps for each saved set.
 - Settings offers persistent date display formats: DD/MM/YYYY (default),
   MM/DD/YYYY, YYYY-MM-DD, or the device locale. History applies the preference on focus.
+- Long-press a library exercise to open Progress: select a logged weight (including assistance)
+  and plot individual completed sets against elapsed time. Set number determines dot
+  color, with a legend; a mode button restricts results to one top set per session
+  (heaviest weight, then most reps, then earliest set). Dates follow Settings.
+  Gifted Charts renders through a reusable component; the compact calendar axis has
+  day ticks and faint month markers. Axis ranges stay fixed across weight selections
+  for an exercise; point padding prevents clipping. Volume mode sums weight × reps
+  across all sets of this exercise per workout; Top sets only uses its heaviest set.
+  The weight filter and set-color legend are hidden in volume mode. Volume is disabled
+  when this exercise history contains negative assistance weights.
 - Display library records: highest logged weight and best reps at that weight.
   Records refresh when the library screen gains focus.
 - Development Settings offers Add demo history: 18 finished workouts, three
   `[Demo]` exercises, and 162 sets across about eight weeks for plotting experiments.
+  Running Add demo history again upgrades existing squat fixtures once: varied
+  working-set weights and reps, with the heaviest set sometimes second. No warm-ups.
 
 ## Code map
 
@@ -51,6 +63,10 @@ is desired; it has not been verified. A web interface is deferred.
 | [SessionScreen.tsx](../mobile/screens/SessionScreen.tsx) | Day selection, session creation, and navigation to the workout. |
 | [ActiveSessionScreen.tsx](../mobile/screens/ActiveSessionScreen.tsx) | Workout inputs, saving sets, completion/skip state, and finish summary. |
 | [ExerciseLibraryScreen.tsx](../mobile/screens/ExerciseLibraryScreen.tsx) | Exercise list and calculated records. |
+| [ProgressScreen.tsx](../mobile/screens/ProgressScreen.tsx) | History loading, weight selection, and chart data preparation. |
+| [ExerciseProgressChart.tsx](../mobile/components/ExerciseProgressChart.tsx) | Reusable chart rendering using Gifted Charts, sized to its container. |
+| [exerciseProgress.ts](../mobile/exerciseProgress.ts) | Top-set selection, per-session volume aggregation, and stable set-number colors. |
+| [chartDateAxis.ts](../mobile/chartDateAxis.ts) | Calendar day/month positions and label density for plots. |
 | [WorkoutHistoryScreen.tsx](../mobile/screens/WorkoutHistoryScreen.tsx) | Finished-session cards and performed-set tables. |
 | [SettingsScreen.tsx](../mobile/screens/SettingsScreen.tsx) | Date preference selection, preview, and saving. |
 | [dateFormat.ts](../mobile/dateFormat.ts) | Allowed date formats, default, and local-date formatting. |
@@ -76,7 +92,8 @@ whether to snapshot the entire plan at workout start. Verify resume on the phone
 by saving a set, closing the app, reopening, and selecting Resume.
 
 Later work includes adding exercises/sets during a workout,
-history editing, and plots. Unique indexes for logged exercise/set positions were
+history editing, and additional plot metrics. Top set means heaviest weight (best reps
+break ties); assisted-exercise volume is deferred because body weight is unknown. Unique indexes for logged exercise/set positions were
 discussed but are not implemented; retry protection currently uses lookups and
 the active screen's save guard.
 
@@ -88,11 +105,17 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 97 tests; the latest run reached
-99.69% line coverage and 91.54% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 119 tests; the latest run reached
+99.74% line coverage and 92.29% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 
 Keep this file and [workout-flow.md](workout-flow.md) current when behavior changes.
 Use brief `/** ... */` comments for function contracts rather than documenting
 every line of implementation.
+
+Database initialization now shares one promise and owned SQLite connection per app
+run (`useNewConnection: true` avoids Expo's cached native-handle reuse). Screens
+await the same schema setup; failed initialization clears the promise for retry.
+Navigation refocus reloads queries without reopening SQLite. This addresses the
+suspected native-handle lifecycle problem; verify Progress → Back after a full reload.

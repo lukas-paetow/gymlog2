@@ -11,10 +11,10 @@ Target **100% statements, branches, functions, and lines** in our TypeScript cod
 Coverage means code executed during tests, not proof that every possible input,
 device behavior, or bug has been checked. Tests must assert useful outcomes.
 
-The runner and coverage reports are now configured. There are 97 repository tests
+The runner and coverage reports are now configured. There are 119 repository tests
 across database, date formatting, screen interactions, navigation, and bootstrap.
-The last full run measured 99.69% lines, 97.29% statements, 99.11% functions, and
-91.54% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
+The last full run measured 99.74% lines, 97.62% statements, 98.89% functions, and
+92.29% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
 Re-run coverage after changes; these numbers are a baseline, not a permanent claim.
 Native Android behavior still requires the emulator checks below.
 
@@ -173,3 +173,33 @@ as part of the initial test setup.
 
 For each feature: agree behavior → write meaningful tests → implement → run checks
 → inspect coverage gaps and git diff → update this inventory and the project guides.
+
+## Progress plotting
+
+`progress.test.tsx` checks weight selection (including negative assistance), empty/error
+states, cleanup during loading, and elapsed-time spacing/single-point rendering. `chartDateAxis.test.ts` checks local
+calendar day/month boundaries and tick density. It
+keeps our chart adapter real and replaces the external drawing component. Database
+tests execute the grouped progress query against real SQLite: finished sessions only,
+individual sets and positions, chronological ordering, null-weight exclusion, and
+exercise isolation. The library interaction test checks long press and accessibility
+activation. Actual SVG appearance and native long-press behaviour need an emulator check.
+
+`chartRendering.test.tsx` keeps Gifted Charts and SVG real, checking that rendered
+dots move on a fixed timeline when series change and remain below the top boundary.
+Native rasterization still needs a visual check.
+
+Progress tests also check all-set/top-set modes, consistent set colors, and weights
+with no top sets. `exerciseProgress.test.ts` covers heaviest-set selection, ties,
+and negative assistance. Demo tests verify varying working weights, top sets in
+different positions, one-time upgrades, retained history after deletion, and
+recomputed PR metadata. The real chart rendering test checks per-point colors.
+
+Volume tests verify mixed-weight session totals, top-set rather than largest-volume
+selection, stable scale across all/top modes, return to the previous reps weight,
+and assistance restrictions. No database schema changes are needed for these metrics.
+
+Connection-lifecycle tests cover overlapping initialization, later reuse, and retry
+after open/schema failures. Database test fixtures reload the database module to
+simulate fresh app processes. A real-navigation test covers Library → Progress → Back
+and refetching records; native SQLite lifetime still requires the user's app check.

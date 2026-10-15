@@ -57,7 +57,7 @@ export default function SettingsScreen() {
       const db = await initializeDatabase();
       const added = await seedDemoHistory(db);
       Alert.alert(added ? 'Demo history added' : 'Demo history already added',
-        added ? '18 finished workouts are ready in Workout history. Demo exercises are in the library.'
+        added ? 'Demo history is ready, including varied squat working sets. Demo exercises are in the library.'
           : 'This dataset has already been added.');
     } catch (cause) {
       console.error('Adding demo history failed:', cause);
@@ -96,7 +96,7 @@ export default function SettingsScreen() {
       {__DEV__ && (
         <View style={{ gap: 12, marginTop: 24 }}>
           <Text style={styles.title}>Demo history</Text>
-          <Text>Add 18 workouts for three demo exercises to explore history and plots.</Text>
+          <Text>Add 18 demo workouts, or enrich existing demo squat working sets, to explore history and plots.</Text>
           <Button title="Add demo history" onPress={addDemoHistory} disabled={isLoading || isSaving || error !== null} />
         </View>
       )}

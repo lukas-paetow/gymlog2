@@ -1,8 +1,7 @@
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { openDatabaseAsync } from 'expo-sqlite';
-import * as database from '../database';
+let database: typeof import('../database');
 import type { DayExerciseDraft, TrainingDayDraft, TrainingDayExercise } from '../database';
 import type { DateFormat } from '../dateFormat';
 import { createTestDatabase } from './support/sqlite';
@@ -10,11 +9,15 @@ import { createTestDatabase } from './support/sqlite';
 
 // create mock opener and connection
 jest.mock('expo-sqlite', () => ({ openDatabaseAsync: jest.fn() }));
-const open = jest.mocked(openDatabaseAsync);
+let open: jest.MockedFunction<typeof import('expo-sqlite').openDatabaseAsync>;
 let fixture: ReturnType<typeof createTestDatabase>;
 const connections: ReturnType<typeof createTestDatabase>[] = [];
 
 function connect(path?: string) {
+  // A fresh module represents a fresh app process and owns one connection.
+  jest.resetModules();
+  database = require('../database');
+  open = jest.mocked(require('expo-sqlite').openDatabaseAsync);
   fixture = createTestDatabase(path);
   connections.push(fixture);
   open.mockResolvedValue(fixture.db);
@@ -84,6 +87,31 @@ describe('initialization and current baseline', () => {
     expect(fixture.connection.prepare('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 });
     const { exercise } = await plan();
     expect(exercise.prescribedWeightFirstSet).toBe(-20);
+  });
+
+  test('concurrent initialization and later navigation reuse a single ready connection', async () => {
+    const exec = jest.spyOn(fixture.adapter, 'execAsync');
+    const connections = await Promise.all([database.initializeDatabase(), database.initializeDatabase(), database.initializeDatabase()]);
+    expect(connections).toEqual([fixture.db, fixture.db, fixture.db]);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith('gymlog.db', { useNewConnection: true });
+    expect(exec).toHaveBeenCalledTimes(1);
+    await database.listExerciseProgress(fixture.db, 1);
+    await database.initializeDatabase();
+    await database.listExercisesWithRecords(fixture.db);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(['open', 'schema'] as const)('initialization retries after a failed %s', async phase => {
+    const failure = new Error('Native failure');
+    if (phase === 'open') open.mockRejectedValueOnce(failure);
+    else jest.spyOn(fixture.adapter, 'execAsync').mockRejectedValueOnce(failure);
+    const failures = await Promise.allSettled([database.initializeDatabase(), database.initializeDatabase()]);
+    expect(failures).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }]);
+    expect(await database.initializeDatabase()).toBe(fixture.db);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(await database.listExercises(fixture.db)).toEqual([]);
   });
 
   test('repeated initialization preserves all existing rows and settings', async () => {
@@ -327,5 +355,82 @@ describe('settings and demo fixtures', () => {
     expect(count('exercises')).toBe(0);
     expect(count('logged_sessions')).toBe(0);
     expect(count('app_settings')).toBe(0);
+  });
+});
+
+describe('exercise progress', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+
+  test('returns individual sets and set positions from finished sessions, isolates exercises, and sorts by date', async () => {
+    const { day, exercise, sessionId } = await plan();
+    expect(await database.listExerciseProgress(fixture.db, exercise.id)).toEqual([]);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 6, 0);
+    // Exclude unfinished sessions even when they contain completed sets.
+    expect(await database.listExerciseProgress(fixture.db, exercise.id)).toEqual([]);
+    await database.finishLoggedSession(fixture.db, sessionId);
+    fixture.connection.prepare('UPDATE logged_sessions SET finish_time = ? WHERE id = ?').run('2026-10-12T12:00:00.000Z', sessionId);
+    const earlier = await database.createLoggedSession(fixture.db, day.id);
+    await database.saveCompletedSet(fixture.db, earlier, exercise, 0, 0, 7, -20);
+    await database.finishLoggedSession(fixture.db, earlier);
+    fixture.connection.prepare('UPDATE logged_sessions SET finish_time = ? WHERE id = ?').run('2026-10-01T12:00:00.000Z', earlier);
+    // Unknown weights cannot be selected for this metric.
+    fixture.connection.prepare('INSERT INTO logged_sets (logged_exercise_id, order_number, reps, weight) SELECT id, 3, 100, NULL FROM logged_exercises WHERE logged_session_id = ?').run(earlier);
+    expect(await database.listExerciseProgress(fixture.db, exercise.id)).toMatchObject([
+      { setPosition: 0, sessionId: earlier, finishTime: '2026-10-01T12:00:00.000Z', weight: -20, reps: 7 },
+      { setPosition: 0, sessionId, finishTime: '2026-10-12T12:00:00.000Z', weight: -20, reps: 8 },
+      { setPosition: 1, sessionId, finishTime: '2026-10-12T12:00:00.000Z', weight: -20, reps: 10 },
+      { setPosition: 2, sessionId, finishTime: '2026-10-12T12:00:00.000Z', weight: 0, reps: 6 },
+    ]);
+    const other = await database.insertExercise(fixture.db, 'Other');
+    expect(await database.listExerciseProgress(fixture.db, other)).toEqual([]);
+  });
+});
+
+
+describe('richer demo squat history', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+
+  test('varies working weights and top-set positions and upgrades an older seed just once', async () => {
+    await database.seedDemoHistory(fixture.db);
+    const squat = (await database.listExercises(fixture.db)).find(row => row.name === '[Demo] Squat')!;
+    const rows = await database.listExerciseProgress(fixture.db, squat.id);
+    expect(rows).toHaveLength(54);
+    for (const sessionId of new Set(rows.map(row => row.sessionId))) {
+      const sets = rows.filter(row => row.sessionId === sessionId);
+      expect(new Set(sets.map(row => row.weight)).size).toBe(3);
+    }
+    const heaviestPositions = new Set<number>();
+    for (const sessionId of new Set(rows.map(row => row.sessionId))) {
+      const sets = rows.filter(row => row.sessionId === sessionId);
+      heaviestPositions.add(sets.reduce((best, set) => set.weight > best.weight ? set : best).setPosition);
+    }
+    expect([...heaviestPositions].sort()).toEqual([0, 1]);
+    // Simulate the earlier seed, whose enrichment marker did not yet exist.
+    fixture.connection.exec("DELETE FROM app_settings WHERE key = 'demo_squat_v2'");
+    fixture.connection.prepare('UPDATE logged_sets SET weight = 70 WHERE id = ?').run(rows[0].id);
+    expect(await database.seedDemoHistory(fixture.db)).toBe(true);
+    expect(await database.listExerciseProgress(fixture.db, squat.id)).toEqual(rows);
+    expect(await database.seedDemoHistory(fixture.db)).toBe(false);
+    const bests = new Map<number, number>();
+    const ordered = fixture.connection.prepare(`SELECT sets.weight, sets.reps, sets.rep_pr_improvement AS improvement
+      FROM logged_sets sets JOIN logged_exercises ex ON ex.id = sets.logged_exercise_id
+      JOIN logged_sessions sessions ON sessions.id = ex.logged_session_id
+      WHERE ex.exercise_id = ? ORDER BY sessions.start_time, sessions.id, sets.order_number`).all(squat.id) as { weight: number; reps: number; improvement: number | null }[];
+    for (const set of ordered) {
+      const previous = bests.get(set.weight);
+      expect(set.improvement).toBe(previous === undefined ? null : Math.max(0, set.reps - previous));
+      bests.set(set.weight, Math.max(previous ?? set.reps, set.reps));
+    }
+  });
+
+  test('does not recreate a demo squat that was deleted', async () => {
+    await database.seedDemoHistory(fixture.db);
+    fixture.connection.exec("DELETE FROM app_settings WHERE key = 'demo_squat_v2'");
+    const squat = (await database.listExercises(fixture.db)).find(row => row.name === '[Demo] Squat')!;
+    await database.deleteExercise(fixture.db, squat.id);
+    expect(await database.seedDemoHistory(fixture.db)).toBe(false);
+    expect(count('logged_sets')).toBe(162);
   });
 });

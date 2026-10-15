@@ -10,6 +10,7 @@ import RoutineScreen from '../screens/RoutineScreen';
 import StartScreen from '../screens/StartScreen';
 
 jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => mockNavigation,
   useFocusEffect: (effect: () => void) => {
     const React = require('react');
     React.useEffect(effect, [effect]);
@@ -29,7 +30,8 @@ jest.mock('../database', () => {
 });
 const db = jest.mocked(database);
 const exercise = { id: 7, name: 'Dips', prescribedSets: 2, prescribedRepsFirstSet: 8, prescribedWeightFirstSet: -20 };
-const navigation = { navigate: jest.fn(), popTo: jest.fn() };
+const mockNavigation = { navigate: jest.fn(), popTo: jest.fn() };
+const navigation = mockNavigation;
 let alert: jest.SpyInstance;
 
 function props<T>(name: string, params?: object): T {
@@ -570,4 +572,15 @@ test('library deletion also updates an existing day draft', async () => {
   await chooseAlert('Delete');
   await fireEvent.press(screen.getByText('Cancel day'));
   expect(screen.getByText('1. Day (0 exercises)')).toBeTruthy();
+});
+
+
+test('holding a library card opens progress for that exercise', async () => {
+  db.listExercisesWithRecords.mockResolvedValue([{ id: 7, name: 'Dips', heaviestWeight: -10, repsAtHeaviestWeight: 8 }]);
+  await render(<ExerciseLibraryScreen />);
+  const card = await screen.findByRole('button', { name: 'View progress for Dips' });
+  await fireEvent(card, 'longPress');
+  expect(navigation.navigate).toHaveBeenCalledWith('Progress', { exerciseId: 7, exerciseName: 'Dips' });
+  await fireEvent(card, 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
+  expect(navigation.navigate).toHaveBeenCalledTimes(2);
 });

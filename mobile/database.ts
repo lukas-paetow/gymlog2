@@ -283,19 +283,32 @@ export const createSettingsTable = `
   );
 `;
 
+// Keep the connection alive and share in-flight initialization between screens.
+// static
+let databaseReady: Promise<SQLite.SQLiteDatabase> | undefined;
+
 export async function initializeDatabase() {
-  return measureDb('initializeDatabase', async () => {
-    const db = await SQLite.openDatabaseAsync('gymlog.db');
-    await db.execAsync('PRAGMA foreign_keys = ON;');
-    await db.execAsync(createRoutinesTable);
-    await db.execAsync(createExercisesTable);
-    await db.execAsync(createTrainingDaysTable);
-    await db.execAsync(createDayExercisesTable);
-    await db.execAsync(createLoggedSessionsTable);
-    await db.execAsync(createLoggedExerciseTable);
-    await db.execAsync(createLoggedSetTable);
-    await db.execAsync(createSettingsTable);
-    return db; // a connection
+  return measureDb('initializeDatabase', () => {
+    if (!databaseReady) {
+      databaseReady = (async () => {
+        // Own one native connection rather than rewrapping Expo's cached handle.
+        const db = await SQLite.openDatabaseAsync('gymlog.db', { useNewConnection: true });
+        await db.execAsync(`PRAGMA foreign_keys = ON;
+          ${createRoutinesTable}
+          ${createExercisesTable}
+          ${createTrainingDaysTable}
+          ${createDayExercisesTable}
+          ${createLoggedSessionsTable}
+          ${createLoggedExerciseTable}
+          ${createLoggedSetTable}
+          ${createSettingsTable}`);
+        return db;
+      })().catch(error => {
+        databaseReady = undefined;
+        throw error;
+      });
+    }
+    return databaseReady;
   });
 }
 
@@ -637,7 +650,10 @@ export async function seedDemoHistory(db: SQLite.SQLiteDatabase): Promise<boolea
       const marker = await db.getFirstAsync<{ value: string }>(
         "SELECT value FROM app_settings WHERE key = 'demo_history_v1'"
       );
-      if (marker) return;
+      if (marker) {
+        added = await enrichSquatDemoHistory(db);
+        return;
+      }
       const definitions = [
         { name: '[Demo] Bench press', baseWeight: 50, increment: 2.5 },
         { name: '[Demo] Squat', baseWeight: 70, increment: 5 },
@@ -699,6 +715,7 @@ export async function seedDemoHistory(db: SQLite.SQLiteDatabase): Promise<boolea
         }
       }
       await db.runAsync("INSERT INTO app_settings (key, value) VALUES ('demo_history_v1', 'added')");
+      await enrichSquatDemoHistory(db);
       added = true;
     });
     return added;
@@ -798,4 +815,74 @@ async function measureDb<T>(
             `[DB] ${label}: ${(performance.now() - start).toFixed(1)} ms`,
         );
     }
+}
+
+/** Individual performed sets from finished workouts, in chronological order. */
+export type ExerciseProgressPoint = {
+  id: number;
+  setPosition: number;
+  sessionId: number;
+  finishTime: string;
+  weight: number;
+  reps: number;
+};
+
+export async function listExerciseProgress(db: SQLite.SQLiteDatabase, exerciseId: number): Promise<ExerciseProgressPoint[]> {
+  return measureDb('listExerciseProgress', () => db.getAllAsync<ExerciseProgressPoint>(
+    `SELECT sets.id, sets.order_number AS setPosition, sessions.id AS sessionId,
+            sessions.finish_time AS finishTime, sets.weight, sets.reps
+     FROM logged_sets AS sets
+     JOIN logged_exercises AS exercises ON exercises.id = sets.logged_exercise_id
+     JOIN logged_sessions AS sessions ON sessions.id = exercises.logged_session_id
+     WHERE exercises.exercise_id = ? AND sessions.finish_time IS NOT NULL AND sets.weight IS NOT NULL
+     ORDER BY sessions.finish_time, sessions.id, exercises.position, sets.order_number, sets.id`,
+    exerciseId
+  ));
+}
+
+
+/** One-time upgrade of demo squat sets; all three sets are working sets. Called inside the seed transaction. */
+async function enrichSquatDemoHistory(db: SQLite.SQLiteDatabase): Promise<boolean> {
+  const marker = await db.getFirstAsync<{ value: string }>("SELECT value FROM app_settings WHERE key = 'demo_squat_v2'");
+  if (marker) return false;
+  const rows = await db.getAllAsync<{ id: number; sessionId: number; setPosition: number }>(
+    `SELECT sets.id, sessions.id AS sessionId, sets.order_number AS setPosition
+     FROM logged_sets AS sets
+     JOIN logged_exercises AS exercises ON exercises.id = sets.logged_exercise_id
+     JOIN logged_sessions AS sessions ON sessions.id = exercises.logged_session_id
+     WHERE exercises.exercise_name = '[Demo] Squat' AND exercises.exercise_id IS NOT NULL
+       AND sessions.routine_name = '[Demo] Progression'
+       AND sets.comment = 'Demo data' AND sets.order_number BETWEEN 0 AND 2
+     ORDER BY sessions.finish_time, sessions.id, sets.order_number`
+  );
+  if (rows.length === 0) return false;
+  const sessions = [...new Set(rows.map(row => row.sessionId))];
+  const heavyWeights = [80, 82.5, 80, 85, 87.5, 85, 90, 87.5, 92.5, 90, 95, 92.5, 97.5, 95, 100, 97.5, 102.5, 100];
+  for (const row of rows) {
+    const workout = sessions.indexOf(row.sessionId);
+    const heavy = heavyWeights[workout % heavyWeights.length];
+    const weights = workout % 2 === 0 ? [heavy, heavy - 5, heavy - 10] : [heavy - 5, heavy, heavy - 10];
+    const reps = [6 + workout % 4, 5 + (workout * 2) % 5, 8 + workout % 3];
+    await db.runAsync('UPDATE logged_sets SET weight = ?, reps = ? WHERE id = ?',
+      weights[row.setPosition], reps[row.setPosition], row.id);
+  }
+  // Recompute this demo exercise's PR metadata after changing its history.
+  const records = await db.getAllAsync<{ id: number; exerciseId: number | null; weight: number | null; reps: number }>(
+    `SELECT sets.id, exercises.exercise_id AS exerciseId, sets.weight, sets.reps
+     FROM logged_sets AS sets
+     JOIN logged_exercises AS exercises ON exercises.id = sets.logged_exercise_id
+     JOIN logged_sessions AS sessions ON sessions.id = exercises.logged_session_id
+     WHERE exercises.exercise_name = '[Demo] Squat'
+     ORDER BY sessions.start_time, sessions.id, sets.order_number, sets.id`
+  );
+  const bests = new Map<string, number>();
+  for (const record of records) {
+    const key = `${record.exerciseId}:${record.weight}`;
+    const previous = bests.get(key);
+    const improvement = previous === undefined ? null : Math.max(0, record.reps - previous);
+    await db.runAsync('UPDATE logged_sets SET rep_pr_improvement = ? WHERE id = ?', improvement, record.id);
+    bests.set(key, Math.max(previous ?? record.reps, record.reps));
+  }
+  await db.runAsync("INSERT INTO app_settings (key, value) VALUES ('demo_squat_v2', 'added')");
+  return true;
 }

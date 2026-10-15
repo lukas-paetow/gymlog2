@@ -169,3 +169,19 @@ does not update existing tables.
 
 Database functions use `measureDb()` to log the duration of the entire async
 operation, including waiting and result handling. Errors propagate and are timed too.
+
+## Exercise progress
+
+Library-card long press opens Progress for that exercise. The query returns every
+saved set with a known weight from finished sessions, including its ID and set
+position. All sets is the default mode; points are colored by their set number
+within the exercise. Top sets only selects the heaviest set per session, then
+most reps, then earliest set, before filtering by selected weight. Axis ranges
+stay fixed across selections within a metric. Volume mode sums weight × reps for
+all sets of this exercise per session, ignoring the weight filter. Top sets only
+uses the single heaviest set instead (with the same tie rules). Exercises with
+negative assistance weights have volume disabled because body weight is unknown.
+
+Settings → Add demo history also upgrades existing demo squat fixtures once,
+with three varied working sets per session and no warm-ups. It preserves workout
+counts and recalculates the demo exercise's PR metadata.
