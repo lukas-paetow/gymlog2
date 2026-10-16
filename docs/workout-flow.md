@@ -185,3 +185,11 @@ negative assistance weights have volume disabled because body weight is unknown.
 Settings → Add demo history also upgrades existing demo squat fixtures once,
 with three varied working sets per session and no warm-ups. It preserves workout
 counts and recalculates the demo exercise's PR metadata.
+
+## History calendar
+
+History adds a monthly calendar above the cards. Select a routine to see saved
+training-day names on local finish dates; the list below still includes all
+workouts. Labels come from each session's name snapshot, so later plan changes
+or deletion do not change the displayed day name. Multiple sessions on one date
+get separate labels. Weeks use explicit seven-cell rows to avoid column wrapping.

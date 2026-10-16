@@ -22,6 +22,8 @@ export type UnfinishedSession = {
 
 export type FinishedWorkout = {
   id: number;
+  routineId: number | null;
+  trainingDayNumber: number | null;
   trainingDayName: string;
   routineName: string;
   finishTime: string;
@@ -481,6 +483,8 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
   return measureDb('listFinishedWorkouts', async () => {
     const rows = await db.getAllAsync<{
       sessionId: number;
+      routineId: number | null;
+      trainingDayNumber: number | null;
       trainingDayName: string;
       routineName: string;
       finishTime: string;
@@ -491,10 +495,12 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
       reps: number;
     }>(
       `SELECT logged_sessions.id AS sessionId,
+              training_days.routine_id AS routineId, training_days.position + 1 AS trainingDayNumber,
               training_day_name AS trainingDayName, routine_name AS routineName,
               finish_time AS finishTime, logged_sets.id AS setId,
               exercise_name AS exerciseName, order_number AS setPosition, weight, reps
        FROM logged_sessions
+       LEFT JOIN training_days ON training_days.id = logged_sessions.training_day_id
        JOIN logged_exercises ON logged_exercises.logged_session_id = logged_sessions.id
        JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
        WHERE finish_time IS NOT NULL
@@ -505,7 +511,8 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
       let workout = workouts.get(row.sessionId);
       if (!workout) {
         workout = {
-          id: row.sessionId, trainingDayName: row.trainingDayName,
+          id: row.sessionId, routineId: row.routineId, trainingDayNumber: row.trainingDayNumber,
+          trainingDayName: row.trainingDayName,
           routineName: row.routineName, finishTime: row.finishTime, sets: [],
         };
         workouts.set(row.sessionId, workout);

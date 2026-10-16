@@ -11,10 +11,10 @@ Target **100% statements, branches, functions, and lines** in our TypeScript cod
 Coverage means code executed during tests, not proof that every possible input,
 device behavior, or bug has been checked. Tests must assert useful outcomes.
 
-The runner and coverage reports are now configured. There are 119 repository tests
+The runner and coverage reports are now configured. There are 125 repository tests
 across database, date formatting, screen interactions, navigation, and bootstrap.
-The last full run measured 99.74% lines, 97.62% statements, 98.89% functions, and
-92.29% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
+The last full run measured 99.75% lines, 97.72% statements, 98.96% functions, and
+92.55% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
 Re-run coverage after changes; these numbers are a baseline, not a permanent claim.
 Native Android behavior still requires the emulator checks below.
 
@@ -203,3 +203,7 @@ Connection-lifecycle tests cover overlapping initialization, later reuse, and re
 after open/schema failures. Database test fixtures reload the database module to
 simulate fresh app processes. A real-navigation test covers Library → Progress → Back
 and refetching records; native SQLite lifetime still requires the user's app check.
+
+Calendar tests cover Monday-first grids, leap months, local dates, routine selection,
+multiple workouts per date, year navigation, and saved names for deleted days. Database tests
+verify routine IDs/current day numbers and retained history after routine deletion.

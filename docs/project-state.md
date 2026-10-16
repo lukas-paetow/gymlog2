@@ -34,6 +34,9 @@ is desired; it has not been verified. A web interface is deferred.
 - Confirm Finish workout, save its finish time, and show a summary modal.
 - Browse finished workouts with at least one saved set from Home, newest first, with local finish dates (without time) and
   tables of exercise names, weight, and reps for each saved set.
+- History includes a Monday-first monthly calendar, routine selection, and training-day
+  name labels on local finish dates. Multiple sessions on a date remain visible.
+  Labels use the names saved with the session, including deleted training days.
 - Settings offers persistent date display formats: DD/MM/YYYY (default),
   MM/DD/YYYY, YYYY-MM-DD, or the device locale. History applies the preference on focus.
 - Long-press a library exercise to open Progress: select a logged weight (including assistance)
@@ -67,6 +70,8 @@ is desired; it has not been verified. A web interface is deferred.
 | [ExerciseProgressChart.tsx](../mobile/components/ExerciseProgressChart.tsx) | Reusable chart rendering using Gifted Charts, sized to its container. |
 | [exerciseProgress.ts](../mobile/exerciseProgress.ts) | Top-set selection, per-session volume aggregation, and stable set-number colors. |
 | [chartDateAxis.ts](../mobile/chartDateAxis.ts) | Calendar day/month positions and label density for plots. |
+| [WorkoutCalendar.tsx](../mobile/components/WorkoutCalendar.tsx) | Monthly calendar, routine selector, and saved training-day names. |
+| [workoutCalendar.ts](../mobile/workoutCalendar.ts) | Local-date keys, routine grouping, and Monday-first month grids. |
 | [WorkoutHistoryScreen.tsx](../mobile/screens/WorkoutHistoryScreen.tsx) | Finished-session cards and performed-set tables. |
 | [SettingsScreen.tsx](../mobile/screens/SettingsScreen.tsx) | Date preference selection, preview, and saving. |
 | [dateFormat.ts](../mobile/dateFormat.ts) | Allowed date formats, default, and local-date formatting. |
@@ -105,8 +110,8 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 119 tests; the latest run reached
-99.74% line coverage and 92.29% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 125 tests; the latest run reached
+99.75% line coverage and 92.55% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 

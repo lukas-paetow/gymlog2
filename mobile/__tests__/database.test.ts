@@ -434,3 +434,19 @@ describe('richer demo squat history', () => {
     expect(count('logged_sets')).toBe(162);
   });
 });
+
+describe('history calendar metadata', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+  test('returns routine and current day number, keeping history when the routine is removed', async () => {
+    const { routineId, day, exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.finishLoggedSession(fixture.db, sessionId);
+    expect((await database.listFinishedWorkouts(fixture.db))[0]).toMatchObject({ routineId, trainingDayNumber: 1 });
+    await fixture.db.runAsync('UPDATE training_days SET position = 2 WHERE id = ?', day.id);
+    expect((await database.listFinishedWorkouts(fixture.db))[0].trainingDayNumber).toBe(3);
+    await database.deleteRoutine(fixture.db, routineId);
+    expect((await database.listFinishedWorkouts(fixture.db))[0]).toMatchObject({
+      routineId: null, trainingDayNumber: null, routineName: 'Routine', trainingDayName: 'Day',
+    });
+  });
+});

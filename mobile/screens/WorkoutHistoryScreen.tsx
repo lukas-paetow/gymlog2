@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { getDateFormat, initializeDatabase, listFinishedWorkouts } from '../database';
 import type { FinishedWorkout } from '../database';
 import { DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
+import WorkoutCalendar from '../components/WorkoutCalendar';
 import type { DateFormat } from '../dateFormat';
 
 export default function WorkoutHistoryScreen() {
@@ -42,6 +43,7 @@ export default function WorkoutHistoryScreen() {
       {isLoading ? <Text>Loading workouts…</Text> : error ? <Text>{error}</Text> : (
         <>
           {workouts.length === 0 && <Text>No finished workouts yet.</Text>}
+          {workouts.length > 0 && <WorkoutCalendar workouts={workouts} dateFormat={dateFormat} />}
           {workouts.map(workout => (
             <View key={workout.id} style={styles.card}>
               <View style={styles.cardHeader}>

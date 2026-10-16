@@ -124,9 +124,9 @@ describe('library and history', () => {
   });
   test('history shows finished dates and rows, including empty workouts and null weights', async () => {
     db.listFinishedWorkouts.mockResolvedValue([
-      { id: 1, trainingDayName: 'Day', routineName: 'Routine', finishTime: '2026-11-23T12:00:00.000Z', sets: [{ id: 10, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 8 }, { id: 11, exerciseName: 'Dips', setPosition: 1, weight: null, reps: 6 }] },
+      { id: 1, routineId: 1, trainingDayNumber: 1, trainingDayName: 'Day', routineName: 'Routine', finishTime: '2026-11-23T12:00:00.000Z', sets: [{ id: 10, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 8 }, { id: 11, exerciseName: 'Dips', setPosition: 1, weight: null, reps: 6 }] },
       // Lower priority: defensive UI fallback; the real history query excludes empty workouts.
-      { id: 2, trainingDayName: 'Empty', routineName: 'Routine', finishTime: '2026-11-22T12:00:00.000Z', sets: [] },
+      { id: 2, routineId: null, trainingDayNumber: null, trainingDayName: 'Empty', routineName: 'Routine', finishTime: '2026-11-22T12:00:00.000Z', sets: [] },
     ]);
     await render(<WorkoutHistoryScreen />);
     await screen.findByText('23/11/2026');
