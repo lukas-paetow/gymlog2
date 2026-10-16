@@ -3,6 +3,9 @@ import WorkoutCalendar from '../components/WorkoutCalendar';
 import { localDateKey, monthCells, routineKey } from '../workoutCalendar';
 import type { FinishedWorkout } from '../database';
 
+const onSelectWorkout = jest.fn();
+beforeEach(() => jest.clearAllMocks());
+
 const workout = (id: number, overrides: Partial<FinishedWorkout> = {}): FinishedWorkout => ({
   id, routineId: 1, routineName: 'Strength', trainingDayNumber: 1, trainingDayName: 'Upper',
   finishTime: '2026-12-10T12:00:00Z', sets: [], ...overrides,
@@ -25,7 +28,7 @@ test('routine identity survives renaming and local dates follow the phone timezo
 });
 
 test('shows saved day names, multiple sessions per date, and a routine selector', async () => {
-  await render(<WorkoutCalendar dateFormat="DD/MM/YYYY" workouts={[
+  await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} dateFormat="DD/MM/YYYY" workouts={[
     workout(1), workout(2, { trainingDayNumber: 2, trainingDayName: 'Lower' }),
     workout(3, { routineId: 2, routineName: 'Other', trainingDayNumber: 3, trainingDayName: 'Full body' }),
   ]} />);
@@ -39,7 +42,7 @@ test('shows saved day names, multiple sessions per date, and a routine selector'
 });
 
 test('month controls cross year boundaries and preserve deleted-day history', async () => {
-  await render(<WorkoutCalendar dateFormat="YYYY-MM-DD" workouts={[
+  await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} dateFormat="YYYY-MM-DD" workouts={[
     workout(1, { routineId: null, trainingDayNumber: null }),
   ]} />);
   expect(screen.getByLabelText('2026-12-10, Upper')).toBeVisible();
@@ -54,9 +57,20 @@ test('month controls cross year boundaries and preserve deleted-day history', as
 test('falls back to a remaining routine if the selected routine disappears on reload', async () => {
   const first = workout(1);
   const second = workout(2, { routineId: 2, routineName: 'Other' });
-  const view = await render(<WorkoutCalendar workouts={[first, second]} dateFormat="DD/MM/YYYY" />);
+  const view = await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} workouts={[first, second]} dateFormat="DD/MM/YYYY" />);
   await fireEvent.press(screen.getByRole('button', { name: 'Calendar routine: Other' }));
-  await view.rerender(<WorkoutCalendar workouts={[first]} dateFormat="DD/MM/YYYY" />);
+  await view.rerender(<WorkoutCalendar onSelectWorkout={onSelectWorkout} workouts={[first]} dateFormat="DD/MM/YYYY" />);
   expect(screen.getByRole('button', { name: 'Calendar routine: Strength' })).toBeDisabled();
   expect(screen.getByLabelText('10/12/2026, Upper')).toBeVisible();
+});
+
+
+test('identical session labels select their own session IDs and expose selection state', async () => {
+  await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} workouts={[workout(1), workout(2)]}
+    selectedWorkoutId={2} dateFormat="DD/MM/YYYY" />);
+  const buttons = screen.getAllByRole('button', { name: 'View Upper on 10/12/2026' });
+  await fireEvent.press(buttons[1]);
+  expect(onSelectWorkout).toHaveBeenCalledWith(2);
+  expect(buttons[1].props.accessibilityState.selected).toBe(true);
+  expect(buttons[0].props.accessibilityState.selected).toBe(false);
 });

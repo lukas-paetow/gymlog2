@@ -8,6 +8,7 @@ import WorkoutCalendar from '../components/WorkoutCalendar';
 import type { DateFormat } from '../dateFormat';
 
 export default function WorkoutHistoryScreen() {
+  const [selectedWorkoutId, setSelectedWorkoutId] = useState<number | null>(null);
   const [workouts, setWorkouts] = useState<FinishedWorkout[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,15 +38,22 @@ export default function WorkoutHistoryScreen() {
     return () => { cancelled = true; };
   }, []));
 
+  const selectedWorkout = workouts.find(workout => workout.id === selectedWorkoutId);
+  const displayedWorkouts = selectedWorkout
+    ? [selectedWorkout, ...workouts.filter(workout => workout.id !== selectedWorkoutId)]
+    : workouts;
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.heading}>Workout history</Text>
       {isLoading ? <Text>Loading workouts…</Text> : error ? <Text>{error}</Text> : (
         <>
           {workouts.length === 0 && <Text>No finished workouts yet.</Text>}
-          {workouts.length > 0 && <WorkoutCalendar workouts={workouts} dateFormat={dateFormat} />}
-          {workouts.map(workout => (
-            <View key={workout.id} style={styles.card}>
+          {workouts.length > 0 && <WorkoutCalendar workouts={workouts} dateFormat={dateFormat}
+            selectedWorkoutId={selectedWorkoutId} onSelectWorkout={setSelectedWorkoutId} />}
+          {displayedWorkouts.map(workout => (
+            <View key={workout.id} testID={`workout-card-${workout.id}`}
+              style={[styles.card, workout.id === selectedWorkoutId && styles.selectedCard]}>
               <View style={styles.cardHeader}>
                 <Text style={styles.name}>
                   {workout.routineName}
@@ -84,6 +92,7 @@ const styles = StyleSheet.create({
   container: { padding: 20, gap: 16 },
   heading: { fontSize: 24 },
   card: { padding: 16, gap: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, backgroundColor: '#fff' },
+  selectedCard: { borderColor: '#2563eb', borderWidth: 2 },
   cardHeader: { flexDirection: 'row', alignItems: 'baseline', gap: 12, marginBottom: 8 },
   name: { fontSize: 20, flex: 1 },
   day: { fontSize: 14, color: '#4b5563' },

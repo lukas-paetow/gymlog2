@@ -193,3 +193,8 @@ training-day names on local finish dates; the list below still includes all
 workouts. Labels come from each session's name snapshot, so later plan changes
 or deletion do not change the displayed day name. Multiple sessions on one date
 get separate labels. Weeks use explicit seven-cell rows to avoid column wrapping.
+
+Calendar names are buttons. `onSelectWorkout(sessionId)` reports the selected
+session to WorkoutHistoryScreen, which owns selection state and moves that
+existing log card directly below the calendar. Other cards stay below it in
+their existing order. Both label and card indicate selection. No new query is needed.

@@ -1,14 +1,19 @@
 import { useState } from 'react';
-import { Button, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Button, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FinishedWorkout } from '../database';
 import type { DateFormat } from '../dateFormat';
 import { formatWorkoutDate } from '../dateFormat';
 import { localDateKey, monthCells, routineKey } from '../workoutCalendar';
 
-type Props = { workouts: FinishedWorkout[]; dateFormat: DateFormat };
+type Props = {
+  workouts: FinishedWorkout[];
+  dateFormat: DateFormat;
+  selectedWorkoutId?: number | null;
+  onSelectWorkout: (sessionId: number) => void;
+};
 
 /** Calendar labels use the training-day names saved with each workout. */
-export default function WorkoutCalendar({ workouts, dateFormat }: Props) {
+export default function WorkoutCalendar({ workouts, dateFormat, selectedWorkoutId = null, onSelectWorkout }: Props) {
   const [month, setMonth] = useState(() => {
     const latest = new Date(workouts[0].finishTime);
     return new Date(latest.getFullYear(), latest.getMonth(), 1, 12);
@@ -55,10 +60,17 @@ export default function WorkoutCalendar({ workouts, dateFormat }: Props) {
             if (!date) return <View key={`empty:${index}`} style={styles.cell} />;
             const entries = byDate.get(localDateKey(date)) ?? [];
             return <View key={date.getDate()} style={[styles.cell, styles.dateCell]}
-              accessible accessibilityLabel={`${formatWorkoutDate(date.toISOString(), dateFormat)}${entries.map(workout => `, ${workout.trainingDayName}`).join('')}`}>
+              accessible={false} accessibilityLabel={`${formatWorkoutDate(date.toISOString(), dateFormat)}${entries.map(workout => `, ${workout.trainingDayName}`).join('')}`}>
               <Text style={styles.date}>{date.getDate()}</Text>
               <View style={styles.badges}>
-                {entries.map(workout => <Text key={workout.id} style={styles.badge}>{workout.trainingDayName}</Text>)}
+                {entries.map(workout => <Pressable key={workout.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${workout.trainingDayName} on ${formatWorkoutDate(workout.finishTime, dateFormat)}`}
+                  accessibilityState={{ selected: workout.id === selectedWorkoutId }}
+                  onPress={() => onSelectWorkout(workout.id)}
+                  style={[styles.session, workout.id === selectedWorkoutId && styles.selectedSession]}>
+                  <Text style={styles.badge}>{workout.trainingDayName}</Text>
+                </Pressable>)}
               </View>
             </View>;
           })}
@@ -80,5 +92,7 @@ const styles = StyleSheet.create({
   weekday: { textAlign: 'center', fontSize: 11, color: '#6b7280' },
   date: { textAlign: 'center', fontSize: 12, color: '#4b5563' },
   badges: { gap: 3, paddingTop: 4 },
-  badge: { textAlign: 'center', paddingHorizontal: 2, paddingVertical: 3, borderRadius: 4, fontSize: 10, backgroundColor: '#dbeafe', color: '#1d4ed8', fontWeight: '600' },
+  session: { paddingHorizontal: 2, paddingVertical: 5, borderRadius: 4, backgroundColor: '#dbeafe' },
+  selectedSession: { backgroundColor: '#bfdbfe', borderWidth: 1, borderColor: '#2563eb' },
+  badge: { textAlign: 'center', fontSize: 10, color: '#1d4ed8', fontWeight: '600' },
 });

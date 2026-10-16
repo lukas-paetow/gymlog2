@@ -584,3 +584,22 @@ test('holding a library card opens progress for that exercise', async () => {
   await fireEvent(card, 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
   expect(navigation.navigate).toHaveBeenCalledTimes(2);
 });
+
+
+test('selecting a calendar session puts its log card first below the calendar without duplication', async () => {
+  const base = { routineId: 1, routineName: 'Routine', trainingDayNumber: 1, trainingDayName: 'Day' };
+  db.listFinishedWorkouts.mockResolvedValue([
+    { ...base, id: 1, finishTime: '2026-11-23T12:00:00Z', sets: [{ id: 1, exerciseName: 'Squat', setPosition: 0, weight: 80, reps: 8 }] },
+    { ...base, id: 2, finishTime: '2026-11-22T12:00:00Z', sets: [{ id: 2, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 6 }] },
+  ]);
+  await render(<WorkoutHistoryScreen />);
+  await screen.findByTestId('workout-card-1');
+  const cardIds = () => screen.getAllByTestId(/^workout-card-/).map(card => card.props.testID);
+  expect(cardIds()).toEqual(['workout-card-1', 'workout-card-2']);
+  await fireEvent.press(screen.getByRole('button', { name: 'View Day on 22/11/2026' }));
+  expect(cardIds()).toEqual(['workout-card-2', 'workout-card-1']);
+  expect(screen.getAllByText('Dips')).toHaveLength(1);
+  expect(db.listFinishedWorkouts).toHaveBeenCalledTimes(1);
+  await fireEvent.press(screen.getByRole('button', { name: 'View Day on 23/11/2026' }));
+  expect(cardIds()).toEqual(['workout-card-1', 'workout-card-2']);
+});

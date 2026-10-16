@@ -37,6 +37,8 @@ is desired; it has not been verified. A web interface is deferred.
 - History includes a Monday-first monthly calendar, routine selection, and training-day
   name labels on local finish dates. Multiple sessions on a date remain visible.
   Labels use the names saved with the session, including deleted training days.
+  Tap a name to highlight its session and move its log card directly below the calendar.
+  Other cards retain their relative order; no additional database read is needed.
 - Settings offers persistent date display formats: DD/MM/YYYY (default),
   MM/DD/YYYY, YYYY-MM-DD, or the device locale. History applies the preference on focus.
 - Long-press a library exercise to open Progress: select a logged weight (including assistance)
@@ -110,8 +112,8 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 125 tests; the latest run reached
-99.75% line coverage and 92.55% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 127 tests; the latest run reached
+99.75% line coverage and 92.64% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 
