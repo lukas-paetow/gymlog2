@@ -22,7 +22,7 @@ jest.mock('@react-native-community/slider', () => {
   return (props: object) => React.createElement(View, props);
 });
 jest.mock('../database', () => {
-  const names = ['initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'listFinishedWorkouts',
+  const names = ['initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'deleteFinishedWorkout', 'listFinishedWorkouts',
     'getDateFormat', 'setDateFormat', 'seedDemoHistory', 'getResumableSession', 'listRoutines', 'listTrainingDays',
     'createLoggedSession', 'getLoggedSession', 'listExercisesInTrainingDay', 'listSavedSessionSets', 'saveCompletedSet',
     'finishLoggedSession', 'listExercises', 'insertRoutine', 'updateRoutine', 'insertExercise', 'deleteRoutine'];
@@ -73,9 +73,10 @@ beforeEach(() => {
   db.getLoggedSession.mockResolvedValue({ trainingDayId: 2, trainingDayName: 'Day', finishTime: null });
   db.listSavedSessionSets.mockResolvedValue([]);
   db.createLoggedSession.mockResolvedValue(4);
-  db.saveCompletedSet.mockResolvedValue(10);
+  db.saveCompletedSet.mockResolvedValue({ id: 10, isPersonalRecord: false });
   db.finishLoggedSession.mockResolvedValue();
   db.deleteExercise.mockResolvedValue();
+  db.deleteFinishedWorkout.mockResolvedValue();
   db.insertRoutine.mockResolvedValue(1);
   db.updateRoutine.mockResolvedValue();
   db.insertExercise.mockResolvedValue(8);
@@ -203,7 +204,7 @@ describe('workout selection', () => {
 
 describe('active workout', () => {
   test('saves negative assistance before unlocking the next set and blocks repeat presses', async () => {
-    const saving = deferred<number>();
+    const saving = deferred<database.SavedSetResult>();
     db.saveCompletedSet.mockReturnValueOnce(saving.promise);
     await renderActive();
     await fireEvent.press(screen.getByText('Dips'));
@@ -214,9 +215,10 @@ describe('active workout', () => {
     expect(screen.getByText('Finish workout')).toBeDisabled();
     await fireEvent.press(screen.getAllByText('Saving…')[0]);
     expect(db.saveCompletedSet).toHaveBeenCalledTimes(1);
-    await act(async () => saving.resolve(10));
+    await act(async () => saving.resolve({ id: 10, isPersonalRecord: false }));
     await press;
     expect(screen.getByLabelText('Dips, set 2 weight in kilograms')).not.toBeDisabled();
+    expect(screen.queryByText('New personal record!')).toBeNull();
     await fireEvent.press(screen.getByText('Complete exercise'));
     expect(screen.getByText('Set 1: 8 reps × -20 kg')).toBeTruthy();
   });
@@ -227,6 +229,7 @@ describe('active workout', () => {
     await fireEvent.press(screen.getAllByText('Complete set')[0]);
     await waitFor(() => expect(alert).toHaveBeenCalledWith('Save failed', expect.any(String)));
     expect(screen.getByLabelText('Dips, set 1 weight in kilograms')).not.toBeDisabled();
+    expect(screen.queryByText('New personal record!')).toBeNull();
     expect(screen.getByLabelText('Dips, set 2 weight in kilograms')).toBeDisabled();
   });
   test('long-press reveals Skip and does not write unperformed data', async () => {
@@ -602,4 +605,99 @@ test('selecting a calendar session puts its log card first below the calendar wi
   expect(db.listFinishedWorkouts).toHaveBeenCalledTimes(1);
   await fireEvent.press(screen.getByRole('button', { name: 'View Day on 23/11/2026' }));
   expect(cardIds()).toEqual(['workout-card-1', 'workout-card-2']);
+});
+
+test('celebrates a personal record after a successful set save', async () => {
+  jest.useFakeTimers();
+  try {
+    db.saveCompletedSet.mockResolvedValueOnce({ id: 10, isPersonalRecord: true });
+    await renderActive();
+    expect(screen.queryByText('New personal record!')).toBeNull();
+    await fireEvent.press(screen.getByText('Dips'));
+    await fireEvent.press(screen.getByLabelText('Complete Dips, set 1'));
+    expect(screen.getByText('New personal record!')).toBeOnTheScreen();
+    expect(screen.getByText('First-set reps: 9')).toBeOnTheScreen();
+    expect(screen.getByLabelText('Dips, set 2 weight in kilograms')).not.toBeDisabled();
+    await screen.unmount();
+  } finally {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  }
+});
+
+test('opening a workout blocks repeat starts and resume until creation finishes', async () => {
+  const opening = deferred<number>();
+  db.createLoggedSession.mockReturnValueOnce(opening.promise);
+  db.getResumableSession.mockResolvedValue({ id: 3, routineName: 'Routine', trainingDayName: 'Day', startTime: new Date().toISOString() });
+  await render(<SessionScreen {...props<Parameters<typeof SessionScreen>[0]>('Session')} />);
+  await fireEvent.press(await screen.findByRole('button', { name: 'Day' }));
+  const pressing = fireEvent.press(screen.getByRole('button', { name: 'Start workout' }));
+  await waitFor(() => expect(db.createLoggedSession).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole('button', { name: 'Start workout' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Resume workout' })).toBeDisabled();
+  await fireEvent.press(screen.getByRole('button', { name: 'Start workout' }));
+  await fireEvent.press(screen.getByRole('button', { name: 'Resume workout' }));
+  expect(db.createLoggedSession).toHaveBeenCalledTimes(1);
+  expect(db.getResumableSession).toHaveBeenCalledTimes(1);
+  await act(async () => opening.resolve(99));
+  await pressing;
+  expect(navigation.navigate).toHaveBeenCalledTimes(1);
+  expect(navigation.navigate).toHaveBeenCalledWith('ActiveSession', { sessionId: 99 });
+});
+
+
+describe('deleting past workouts', () => {
+  const first = { id: 1, routineId: 1, trainingDayNumber: 1, trainingDayName: 'Upper', routineName: 'Routine', finishTime: '2026-11-23T12:00:00Z', sets: [] };
+  const second = { ...first, id: 2, trainingDayName: 'Lower', finishTime: '2026-11-22T12:00:00Z' };
+  test('long press offers cancel and delete, then removes the selected card and calendar entry', async () => {
+    db.listFinishedWorkouts.mockResolvedValue([first, second]);
+    await render(<WorkoutHistoryScreen />);
+    await screen.findByTestId('workout-card-1');
+    await fireEvent.press(screen.getByRole('button', { name: 'View Upper on 23/11/2026' }));
+    await fireEvent(screen.getByTestId('workout-card-1'), 'longPress');
+    expect(alert).toHaveBeenLastCalledWith('Delete workout?', expect.stringContaining('Upper'), expect.any(Array));
+    await chooseAlert('Cancel');
+    expect(db.deleteFinishedWorkout).not.toHaveBeenCalled();
+    await fireEvent(screen.getByTestId('workout-card-1'), 'longPress');
+    await chooseAlert('Delete');
+    expect(db.deleteFinishedWorkout).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(screen.queryByTestId('workout-card-1')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'View Upper on 23/11/2026' })).toBeNull();
+    expect(screen.getByTestId('workout-card-2')).toBeVisible();
+    await fireEvent(screen.getByTestId('workout-card-2'), 'longPress');
+    await chooseAlert('Delete');
+    expect(screen.getByText('No finished workouts yet.')).toBeVisible();
+  });
+  test('a failed delete keeps the card and calendar entry', async () => {
+    db.listFinishedWorkouts.mockResolvedValue([first]);
+    db.deleteFinishedWorkout.mockRejectedValueOnce(new Error('disk failure'));
+    await render(<WorkoutHistoryScreen />);
+    await fireEvent(await screen.findByTestId('workout-card-1'), 'longPress');
+    await chooseAlert('Delete');
+    expect(alert).toHaveBeenLastCalledWith('Delete failed', expect.any(String));
+    expect(screen.getByTestId('workout-card-1')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'View Upper on 23/11/2026' })).toBeVisible();
+  });
+});
+
+
+test('holding a calendar session offers the same deletion confirmation and blocks duplicate deletes', async () => {
+  const removal = deferred<void>();
+  db.deleteFinishedWorkout.mockReturnValueOnce(removal.promise);
+  db.listFinishedWorkouts.mockResolvedValue([{ id: 7, routineId: 1, trainingDayNumber: 1,
+    trainingDayName: 'Upper', routineName: 'Routine', finishTime: '2026-11-23T12:00:00Z', sets: [] }]);
+  await render(<WorkoutHistoryScreen />);
+  const label = await screen.findByRole('button', { name: 'View Upper on 23/11/2026' });
+  await fireEvent(label, 'longPress');
+  const buttons = alert.mock.calls.at(-1)?.[2];
+  const remove = buttons.find((button: { text: string }) => button.text === 'Delete').onPress;
+  let pending!: Promise<void>;
+  await act(async () => { pending = remove(); });
+  expect(db.deleteFinishedWorkout).toHaveBeenCalledTimes(1);
+  await act(async () => { await remove(); });
+  await fireEvent(label, 'longPress');
+  expect(alert).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('workout-card-7')).toBeVisible();
+  await act(async () => { removal.resolve(); await pending; });
+  expect(screen.getByText('No finished workouts yet.')).toBeVisible();
 });

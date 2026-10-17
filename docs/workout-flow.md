@@ -77,7 +77,10 @@ reps/weight; later sets start blank. Drafts are not database records.
 5. After success, the screen marks the draft completed and unlocks the next row.
    On failure, it shows an error and keeps the draft unfinished.
 
-The function returns the saved/existing set ID; the screen currently does not retain it.
+The function returns `{ id, isPersonalRecord }` after the transaction succeeds.
+The flag is true only for a newly inserted same-weight rep improvement. Retries
+return the existing ID with a false flag. The active screen triggers a roughly
+1.5-second "New personal record!" animation without blocking workout controls.
 `withTransactionAsync` uses a shared connection. The screen serializes its writes,
 but this is not a global database write queue.
 
@@ -124,11 +127,15 @@ finish date on the right (no time), and one table row per set: exercise (with se
 
 ## Recovery
 
-Workout selection offers a single Resume button for the newest unfinished session
-(`finish_time IS NULL`) started within the last six hours. The window is measured
+Workout selection offers a single Resume button only when the newest started
+session is unfinished (`finish_time IS NULL`) and within the last six hours. The window is measured
 from session start, not last activity. It refreshes on focus and is rechecked when
 Resume is pressed. There is no unfinished-workout list. Older sessions remain in
-storage but are not offered for resume. Resume uses the existing session ID.
+storage but are not offered for resume. Finishing the newest session never
+reveals an older one. Starting a new workout closes previous unfinished sessions
+and inserts the new session in one transaction. Completed sets remain in history;
+empty sessions remain excluded. Repeat starts/resumes are blocked while opening.
+Resume uses the existing session ID.
 The active screen restores saved reps/weights, locks completed set rows, and
 restores exercise positions. New exercises get a position above the restored maximum.
 Snapshot names and prescriptions override changed plans for performed exercises.
@@ -198,3 +205,17 @@ Calendar names are buttons. `onSelectWorkout(sessionId)` reports the selected
 session to WorkoutHistoryScreen, which owns selection state and moves that
 existing log card directly below the calendar. Other cards stay below it in
 their existing order. Both label and card indicate selection. No new query is needed.
+
+A newly saved same-weight rep PR also updates this training day’s exercise target
+to reps + 1 in the same transaction. The active target updates after success.
+Historical logged prescriptions and other training-day plans are unchanged.
+
+## Delete a past workout
+
+Long-press its history card or calendar name to confirm Delete. The screen calls
+`deleteFinishedWorkout()`, which validates a finished session and deletes its
+logged sets, logged exercises, and session in one transaction. On success the
+screen removes its card/calendar entry and clears that selection. Failure retains
+the displayed history. Library exercises and training plans are not deleted.
+Current PR queries and plots use the remaining sets on their next focus reload.
+Stored historical PR deltas and prescribed targets are not rewritten by deletion.

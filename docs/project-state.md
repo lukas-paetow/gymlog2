@@ -28,10 +28,18 @@ is desired; it has not been verified. A web interface is deferred.
 - Resume a recent unfinished session (within six hours of its start) from workout selection; restore saved sets and workout order.
 - Expand exercise cards to edit reps and weight; sets are editable sequentially.
 - Save each completed set immediately. Failed saves leave the set unfinished.
+- A newly saved same-weight rep PR triggers a short fade/rise/scale animation reading
+  "New personal record!". First baselines, ties, and idempotent retries do not celebrate.
+  A new PR also sets this day/exercise prescription to PR reps + 1 in the save
+  transaction and updates the active target. Existing targets are not normalized
+  until another PR occurs; historical prescription snapshots are preserved.
 - Complete an exercise after at least one performed set; show its summary above the
   divider separating completed and remaining exercises.
 - Long-press an exercise header with no completed sets to reveal Skip.
 - Confirm Finish workout, save its finish time, and show a summary modal.
+- Long-press a past workout card or its calendar name for a Cancel/Delete confirmation.
+  Successful deletion removes that session’s logged sets/exercises and calendar entry;
+  plans and library exercises remain. Failed deletes keep the card visible.
 - Browse finished workouts with at least one saved set from Home, newest first, with local finish dates (without time) and
   tables of exercise names, weight, and reps for each saved set.
 - History includes a Monday-first monthly calendar, routine selection, and training-day
@@ -72,6 +80,7 @@ is desired; it has not been verified. A web interface is deferred.
 | [ExerciseProgressChart.tsx](../mobile/components/ExerciseProgressChart.tsx) | Reusable chart rendering using Gifted Charts, sized to its container. |
 | [exerciseProgress.ts](../mobile/exerciseProgress.ts) | Top-set selection, per-session volume aggregation, and stable set-number colors. |
 | [chartDateAxis.ts](../mobile/chartDateAxis.ts) | Calendar day/month positions and label density for plots. |
+| [PersonalRecordCelebration.tsx](../mobile/components/PersonalRecordCelebration.tsx) | Brief non-blocking PR animation using React Native Animated. |
 | [WorkoutCalendar.tsx](../mobile/components/WorkoutCalendar.tsx) | Monthly calendar, routine selector, and saved training-day names. |
 | [workoutCalendar.ts](../mobile/workoutCalendar.ts) | Local-date keys, routine grouping, and Monday-first month grids. |
 | [WorkoutHistoryScreen.tsx](../mobile/screens/WorkoutHistoryScreen.tsx) | Finished-session cards and performed-set tables. |
@@ -81,7 +90,7 @@ is desired; it has not been verified. A web interface is deferred.
 ## Persistence and next work
 
 Completed sets, exercise snapshots, session start time, and finish time survive
-app shutdown. Workout selection offers one Resume button for the most recent unfinished session
+app shutdown. Workout selection offers one Resume button for the newest session if it is unfinished and
 started within the last six hours, refreshed on screen focus and rechecked on press.
 Older sessions remain stored but are not offered for resume.
 Resume restores saved performance and positions, using snapshots for started
@@ -92,7 +101,9 @@ saved exercises but cannot recover unstarted ones.
 Unsaved inputs, skipped exercises, and explicit exercise completion are only in
 screen state. On resume, exercises with all prescribed sets saved are completed;
 partially performed exercises become editable again. Starting another workout
-still creates another session; no single-active-session rule is enforced.
+atomically closes earlier unfinished sessions and creates the new one. Saved sets
+remain in history; empty sessions stay excluded. Finishing never revives older
+unfinished sessions. Start and Resume are guarded while an open is in flight.
 
 Next decisions include persisting drafts and skip/early-completion status, and
 whether to snapshot the entire plan at workout start. Verify resume on the phone
@@ -112,8 +123,8 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 127 tests; the latest run reached
-99.75% line coverage and 92.64% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 142 tests; the latest run reached
+99.66% line coverage and 92.67% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 

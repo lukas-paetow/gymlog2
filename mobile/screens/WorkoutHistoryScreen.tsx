@@ -1,13 +1,15 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { getDateFormat, initializeDatabase, listFinishedWorkouts } from '../database';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { deleteFinishedWorkout, getDateFormat, initializeDatabase, listFinishedWorkouts } from '../database';
 import type { FinishedWorkout } from '../database';
 import { DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
 import WorkoutCalendar from '../components/WorkoutCalendar';
 import type { DateFormat } from '../dateFormat';
 
 export default function WorkoutHistoryScreen() {
+  const deletingRef = useRef(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<number | null>(null);
   const [workouts, setWorkouts] = useState<FinishedWorkout[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,6 +40,33 @@ export default function WorkoutHistoryScreen() {
     return () => { cancelled = true; };
   }, []));
 
+  async function removeWorkout(sessionId: number) {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    setIsDeleting(true);
+    try {
+      const db = await initializeDatabase();
+      await deleteFinishedWorkout(db, sessionId);
+      setWorkouts(current => current.filter(workout => workout.id !== sessionId));
+      setSelectedWorkoutId(current => current === sessionId ? null : current);
+    } catch (cause) {
+      console.error('Deleting workout failed:', cause);
+      Alert.alert('Delete failed', 'Could not delete the workout. Please try again.');
+    } finally {
+      deletingRef.current = false;
+      setIsDeleting(false);
+    }
+  }
+
+  function confirmDelete(workout: FinishedWorkout) {
+    if (deletingRef.current) return;
+    Alert.alert('Delete workout?',
+      `${workout.routineName} · ${workout.trainingDayName}\n${formatWorkoutDate(workout.finishTime, dateFormat)}\nDelete this workout and all its logged sets?\n\nSaved PR flags in other workouts stay unchanged. Your current PRs may change because they are calculated from the remaining history.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => removeWorkout(workout.id) },
+      ]);
+  }
+
   const selectedWorkout = workouts.find(workout => workout.id === selectedWorkoutId);
   const displayedWorkouts = selectedWorkout
     ? [selectedWorkout, ...workouts.filter(workout => workout.id !== selectedWorkoutId)]
@@ -50,12 +79,15 @@ export default function WorkoutHistoryScreen() {
         <>
           {workouts.length === 0 && <Text>No finished workouts yet.</Text>}
           {workouts.length > 0 && <WorkoutCalendar workouts={workouts} dateFormat={dateFormat}
-            selectedWorkoutId={selectedWorkoutId} onSelectWorkout={setSelectedWorkoutId} />}
+            selectedWorkoutId={selectedWorkoutId} onSelectWorkout={setSelectedWorkoutId}
+            onLongPressWorkout={confirmDelete} />}
           {displayedWorkouts.map(workout => (
-            <View key={workout.id} testID={`workout-card-${workout.id}`}
+            <Pressable key={workout.id} testID={`workout-card-${workout.id}`} accessible={false}
+              disabled={isDeleting} onLongPress={() => confirmDelete(workout)}
               style={[styles.card, workout.id === selectedWorkoutId && styles.selectedCard]}>
               <View style={styles.cardHeader}>
-                <Text style={styles.name}>
+                <Text style={styles.name} accessibilityActions={[{ name: 'delete', label: 'Delete workout' }]}
+                  onAccessibilityAction={() => confirmDelete(workout)}>
                   {workout.routineName}
                   <Text style={styles.day}> · {workout.trainingDayName}</Text>
                 </Text>
@@ -80,7 +112,7 @@ export default function WorkoutHistoryScreen() {
                   ))}
                 </View>
               )}
-            </View>
+            </Pressable>
           ))}
         </>
       )}

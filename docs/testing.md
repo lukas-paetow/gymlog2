@@ -11,10 +11,10 @@ Target **100% statements, branches, functions, and lines** in our TypeScript cod
 Coverage means code executed during tests, not proof that every possible input,
 device behavior, or bug has been checked. Tests must assert useful outcomes.
 
-The runner and coverage reports are now configured. There are 127 repository tests
+The runner and coverage reports are now configured. There are 142 repository tests
 across database, date formatting, screen interactions, navigation, and bootstrap.
-The last full run measured 99.75% lines, 97.74% statements, 98.97% functions, and
-92.64% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
+The last full run measured 99.66% lines, 97.72% statements, 98.72% functions, and
+92.67% branches. `database.ts` and `dateFormat.ts` reached 100% on all four metrics.
 Re-run coverage after changes; these numbers are a baseline, not a permanent claim.
 Native Android behavior still requires the emulator checks below.
 
@@ -211,3 +211,16 @@ verify routine IDs/current day numbers and retained history after routine deleti
 Calendar-selection tests verify exact session IDs even for duplicate labels,
 selected state, and moving the chosen log card below the calendar without
 duplicating cards or reloading the database.
+
+PR celebration tests cover the saved PR flag, retry suppression, display after
+successful saving, timed disappearance, restart on another PR, and dismissal.
+The animation uses React Native Animated with no additional dependency.
+
+Session tests verify one unfinished workout after a new start, preserved sets, no
+older resume after finishing, rollback if creation fails, and repeat-start guards.
+PR target tests verify reps + 1 for the current training day, unchanged historical
+prescriptions/other days, retry suppression, rollback, and deleted-day handling.
+
+Finished-workout deletion tests cover card/calendar confirmation, cancel, selected
+card removal, failure retention, repeat-press guards, finished-session validation,
+child-row deletion order, preserved other history/plans, and transaction rollback.

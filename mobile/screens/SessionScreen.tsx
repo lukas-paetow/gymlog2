@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, ScrollView, TextInput, Button, View, Alert, Modal } from 'react-native';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { getResumableSession, createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
 import { Routine, TrainingDay, UnfinishedSession} from '../database'
@@ -21,6 +21,8 @@ export default function SessionScreen({ navigation }: Props) {
   const [selectedDay, setSelectedDay] = useState<TrainingDay | null>(null);
 
 
+  const openingRef = useRef(false);
+  const [isOpening, setIsOpening] = useState(false);
   const [resumableSession, setResumableSession] = useState<UnfinishedSession | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -51,7 +53,9 @@ export default function SessionScreen({ navigation }: Props) {
       
 
   async function startWorkout() {
-    if (selectedDay === null) return;
+    if (selectedDay === null || openingRef.current) return;
+    openingRef.current = true;
+    setIsOpening(true);
     console.log('Starting workout for:', selectedDay.name);
     try {
         const db = await initializeDatabase();
@@ -60,11 +64,17 @@ export default function SessionScreen({ navigation }: Props) {
     } catch (error) {
         console.error('Starting workout failed:', error);
         Alert.alert('Start failed', 'Could not start the workout.');
+    } finally {
+        openingRef.current = false;
+        setIsOpening(false);
     }
 }
 
 
   async function resumeWorkout() {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setIsOpening(true);
     try {
       const db = await initializeDatabase();
       // Recheck the time window in case this screen has been open for hours.
@@ -75,6 +85,9 @@ export default function SessionScreen({ navigation }: Props) {
     } catch (error) {
       console.error('Resuming workout failed:', error);
       Alert.alert('Resume failed', 'Could not load the workout.');
+    } finally {
+      openingRef.current = false;
+      setIsOpening(false);
     }
   }
 
@@ -83,7 +96,7 @@ export default function SessionScreen({ navigation }: Props) {
     <ScrollView contentContainerStyle={{ padding:20}}>
       {resumableSession !== null && (
         <View style={{ gap: 12, marginBottom: 24 }}>
-          <Button title="Resume workout" onPress={resumeWorkout} />
+          <Button title="Resume workout" onPress={resumeWorkout} disabled={isOpening} />
         </View>
       )}
       {routinesWithDays.map(({ routine, days}) => ( // object desctructuring with ({ })
@@ -100,7 +113,7 @@ export default function SessionScreen({ navigation }: Props) {
         <View>
           <Button
             title="Start workout"
-            disabled={selectedDay === null}
+            disabled={selectedDay === null || isOpening}
             onPress={startWorkout}
           />
         </View>

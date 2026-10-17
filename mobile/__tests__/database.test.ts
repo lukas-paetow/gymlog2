@@ -207,7 +207,7 @@ describe('logging, records, and history', () => {
     const { exercise, sessionId } = await plan();
     expect(count('logged_exercises')).toBe(0);
     const id = await database.saveCompletedSet(fixture.db, sessionId, exercise, 4, 0, 8, -20);
-    expect(await database.saveCompletedSet(fixture.db, sessionId, exercise, 4, 0, 8, -20)).toBe(id);
+    expect(await database.saveCompletedSet(fixture.db, sessionId, exercise, 4, 0, 8, -20)).toEqual(id);
     await database.saveCompletedSet(fixture.db, sessionId, exercise, 4, 1, 6, 0);
     expect(count('logged_exercises')).toBe(1);
     expect(count('logged_sets')).toBe(2);
@@ -216,9 +216,12 @@ describe('logging, records, and history', () => {
 
   test('same-weight PR baseline, improvement, ties, and different weights', async () => {
     const { exercise, sessionId } = await plan();
+    const results: import('../database').SavedSetResult[] = [];
     for (const [position, reps, weight] of [[0, 8, -20], [1, 10, -20], [2, 10, -20], [3, 5, 0]]) {
-      await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, position, reps, weight);
+      results.push(await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, position, reps, weight));
     }
+    expect(results.map(result => result.isPersonalRecord)).toEqual([false, true, false, false]);
+    expect(await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20)).toEqual({ id: results[1].id, isPersonalRecord: false });
     expect(fixture.connection.prepare('SELECT rep_pr_improvement FROM logged_sets ORDER BY id').all().map(row => row.rep_pr_improvement)).toEqual([null, 2, 0, null]);
     const unused = await database.insertExercise(fixture.db, 'Unused');
     const records = await database.listExercisesWithRecords(fixture.db);
@@ -297,6 +300,8 @@ describe('logging, records, and history', () => {
     insert.run('2026-01-01T11:00:00.000Z', null);
     insert.run('2026-01-01T11:30:00.000Z', 'finished');
     insert.run('2026-01-01T13:00:00.000Z', null);
+    expect(await database.getResumableSession(fixture.db)).toBeNull();
+    fixture.connection.exec('DELETE FROM logged_sessions WHERE id = 4');
     expect((await database.getResumableSession(fixture.db))?.id).toBe(3);
     fixture.connection.exec('DELETE FROM logged_sessions WHERE id = 3');
     expect((await database.getResumableSession(fixture.db))?.id).toBe(2);
@@ -448,5 +453,106 @@ describe('history calendar metadata', () => {
     expect((await database.listFinishedWorkouts(fixture.db))[0]).toMatchObject({
       routineId: null, trainingDayNumber: null, routineName: 'Routine', trainingDayName: 'Day',
     });
+  });
+});
+
+describe('PR prescription progression', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+
+  test('a PR sets this training day target to reps plus one, without changing other days or historical prescriptions', async () => {
+    const { day, exercise, sessionId } = await plan();
+    const otherRoutine = await database.insertRoutine(fixture.db, 'Other routine', [{ name: 'Other day', exercises: [prescription(exercise.id, { prescribedRepsFirstSet: 12 })] }]);
+    const [otherDay] = await database.listTrainingDays(fixture.db, otherRoutine);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(8);
+    const result = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20);
+    expect(result.isPersonalRecord).toBe(true);
+    expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(11);
+    expect((await database.listExercisesInTrainingDay(fixture.db, otherDay.id))[0].prescribedRepsFirstSet).toBe(12);
+    expect((await database.listSavedSessionSets(fixture.db, sessionId))[0].prescribedRepsFirstSet).toBe(8);
+    await fixture.db.runAsync('UPDATE day_exercises SET prescribed_reps_firstset = 15 WHERE training_day_id = ?', day.id);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 10, -20);
+    expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(15);
+  });
+
+  test('a failed target update rolls back the new PR set', async () => {
+    const { day, exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    fixture.connection.exec(`CREATE TRIGGER reject_target BEFORE UPDATE ON day_exercises
+      BEGIN SELECT RAISE(ABORT, 'target failed'); END`);
+    await expect(database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20)).rejects.toThrow('target failed');
+    expect(count('logged_sets')).toBe(1);
+    expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(8);
+  });
+
+  test('a deleted training day does not prevent saving a PR to the existing session', async () => {
+    const { day, exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.deleteTrainingDay(fixture.db, day.id);
+    expect((await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 9, -20)).isPersonalRecord).toBe(true);
+    expect(count('logged_sets')).toBe(2);
+  });
+});
+
+
+describe('single resumable workout', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+  test('starting another workout closes earlier sessions, preserves sets, and finishing never resurfaces an older session', async () => {
+    const { day, exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    const next = await database.createLoggedSession(fixture.db, day.id);
+    expect(fixture.connection.prepare('SELECT id FROM logged_sessions WHERE finish_time IS NULL').all()).toEqual([{ id: next }]);
+    expect((await database.getResumableSession(fixture.db))?.id).toBe(next);
+    expect((await database.listFinishedWorkouts(fixture.db)).map(row => row.id)).toEqual([sessionId]);
+    await database.finishLoggedSession(fixture.db, next);
+    expect(await database.getResumableSession(fixture.db)).toBeNull();
+    expect(count('logged_sets')).toBe(1);
+  });
+  test('a failed new-session insert keeps the earlier session resumable', async () => {
+    const { day, sessionId } = await plan();
+    fixture.connection.exec(`CREATE TRIGGER reject_session BEFORE INSERT ON logged_sessions
+      BEGIN SELECT RAISE(ABORT, 'start failed'); END`);
+    await expect(database.createLoggedSession(fixture.db, day.id)).rejects.toThrow('start failed');
+    expect((await database.getResumableSession(fixture.db))?.id).toBe(sessionId);
+    expect((await database.getLoggedSession(fixture.db, sessionId))?.finishTime).toBeNull();
+  });
+});
+
+describe('deleting finished workouts', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+  test('deletes just that session and its rows, preserving other history and plans', async () => {
+    const { day, exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.finishLoggedSession(fixture.db, sessionId);
+    const second = await database.createLoggedSession(fixture.db, day.id);
+    await database.saveCompletedSet(fixture.db, second, exercise, 0, 0, 6, -10);
+    await database.finishLoggedSession(fixture.db, second);
+    await database.deleteFinishedWorkout(fixture.db, second);
+    expect((await database.listFinishedWorkouts(fixture.db)).map(row => row.id)).toEqual([sessionId]);
+    expect(count('logged_sets')).toBe(1);
+    expect(count('logged_exercises')).toBe(1);
+    expect(count('logged_sessions')).toBe(1);
+    expect((await database.listExercisesWithRecords(fixture.db))[0]).toMatchObject({ heaviestWeight: -20, repsAtHeaviestWeight: 8 });
+    expect(count('day_exercises')).toBe(1);
+    expect(count('routines')).toBe(1);
+    expect(fixture.connection.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+  test('refuses to delete unfinished or nonexistent sessions', async () => {
+    const { sessionId } = await plan();
+    await expect(database.deleteFinishedWorkout(fixture.db, sessionId)).rejects.toThrow('Finished workout not found');
+    await expect(database.deleteFinishedWorkout(fixture.db, 999)).rejects.toThrow('Finished workout not found');
+    expect(count('logged_sessions')).toBe(1);
+  });
+  test('rolls back removed sets and exercises if session deletion fails', async () => {
+    const { exercise, sessionId } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+    await database.finishLoggedSession(fixture.db, sessionId);
+    fixture.connection.exec(`CREATE TRIGGER reject_delete BEFORE DELETE ON logged_sessions
+      BEGIN SELECT RAISE(ABORT, 'delete failed'); END`);
+    await expect(database.deleteFinishedWorkout(fixture.db, sessionId)).rejects.toThrow('delete failed');
+    expect(count('logged_sets')).toBe(1);
+    expect(count('logged_exercises')).toBe(1);
+    expect(count('logged_sessions')).toBe(1);
   });
 });

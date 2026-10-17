@@ -138,6 +138,8 @@ export const createLoggedSetTable = `
 
 // Positions come from the active workout, not the training-day template.
 // Assign the exercise position on its first saved set and retain it afterward.
+export type SavedSetResult = { id: number; isPersonalRecord: boolean };
+
 export async function saveCompletedSet(
     db: SQLite.SQLiteDatabase,
     sessionId: number,
@@ -146,7 +148,7 @@ export async function saveCompletedSet(
     setPosition: number,
     reps: number,
     weight: number,
-): Promise<number> {
+): Promise<SavedSetResult> {
     return measureDb('saveCompletedSet', async () => {
         if (!Number.isInteger(reps) || reps < 1
             || !Number.isFinite(weight) 
@@ -156,12 +158,14 @@ export async function saveCompletedSet(
         }
 
         let setId = 0;
+        let isPersonalRecord = false;
 
         await db.withTransactionAsync(async () => {
             const session = await db.getFirstAsync<{
                 finish_time: string | null;
+                training_day_id: number | null;
             }>(
-                'SELECT finish_time FROM logged_sessions WHERE id = ?',
+                'SELECT finish_time, training_day_id FROM logged_sessions WHERE id = ?',
                 sessionId,
             );
 
@@ -239,9 +243,17 @@ export async function saveCompletedSet(
             );
 
             setId = result.lastInsertRowId;
+            isPersonalRecord = improvement !== null && improvement > 0;
+            if (isPersonalRecord) {
+                await db.runAsync(
+                    `UPDATE day_exercises SET prescribed_reps_firstset = ?
+                     WHERE training_day_id = ? AND exercise_id = ?`,
+                    reps + 1, session.training_day_id, exercise.id,
+                );
+            }
         });
 
-        return setId;
+        return { id: setId, isPersonalRecord };
     });
 }
 
@@ -447,17 +459,21 @@ export async function createLoggedSession(db: SQLite.SQLiteDatabase, trainingDay
       throw new Error('Training day does not exist');
     }
 
-    const result = await db.runAsync(
-      `INSERT INTO logged_sessions
-       (training_day_id, training_day_name, routine_name, start_time)
-       VALUES (?, ?, ?, ?)`,
-      trainingDayId,
-      day.training_day_name,
-      day.routine_name,
-      new Date().toISOString()
-    );
-
-    return result.lastInsertRowId;
+    let sessionId = 0;
+    const startTime = new Date().toISOString();
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        'UPDATE logged_sessions SET finish_time = ? WHERE finish_time IS NULL', startTime
+      );
+      const result = await db.runAsync(
+        `INSERT INTO logged_sessions
+         (training_day_id, training_day_name, routine_name, start_time)
+         VALUES (?, ?, ?, ?)`,
+        trainingDayId, day.training_day_name, day.routine_name, startTime
+      );
+      sessionId = result.lastInsertRowId;
+    });
+    return sessionId;
   });
 }
 
@@ -526,7 +542,7 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
   });
 }
 
-/** Offers only the most recent unfinished workout started within six hours. */
+/** Only the newest started session can resume; finishing it never revives older ones. */
 export async function getResumableSession(db: SQLite.SQLiteDatabase): Promise<UnfinishedSession | null> {
   const now = new Date();
   const cutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
@@ -534,9 +550,10 @@ export async function getResumableSession(db: SQLite.SQLiteDatabase): Promise<Un
     `SELECT id, training_day_name AS trainingDayName, routine_name AS routineName,
             start_time AS startTime
      FROM logged_sessions
-     WHERE finish_time IS NULL AND start_time >= ? AND start_time <= ?
-     ORDER BY start_time DESC, id DESC LIMIT 1`,
-    cutoff, now.toISOString()
+     WHERE id = (SELECT id FROM logged_sessions WHERE start_time <= ?
+                 ORDER BY start_time DESC, id DESC LIMIT 1)
+       AND finish_time IS NULL AND start_time >= ?`,
+    now.toISOString(), cutoff
   ));
 }
 
@@ -892,4 +909,20 @@ async function enrichSquatDemoHistory(db: SQLite.SQLiteDatabase): Promise<boolea
   }
   await db.runAsync("INSERT INTO app_settings (key, value) VALUES ('demo_squat_v2', 'added')");
   return true;
+}
+
+/** Deletes one finished workout and its performed sets, leaving plans and library intact. */
+export async function deleteFinishedWorkout(db: SQLite.SQLiteDatabase, sessionId: number): Promise<void> {
+  return measureDb('deleteFinishedWorkout', () => db.withTransactionAsync(async () => {
+    const session = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM logged_sessions WHERE id = ? AND finish_time IS NOT NULL', sessionId
+    );
+    if (!session) throw new Error('Finished workout not found');
+    await db.runAsync(
+      `DELETE FROM logged_sets WHERE logged_exercise_id IN
+       (SELECT id FROM logged_exercises WHERE logged_session_id = ?)`, sessionId
+    );
+    await db.runAsync('DELETE FROM logged_exercises WHERE logged_session_id = ?', sessionId);
+    await db.runAsync('DELETE FROM logged_sessions WHERE id = ?', sessionId);
+  }));
 }

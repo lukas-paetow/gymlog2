@@ -10,10 +10,11 @@ type Props = {
   dateFormat: DateFormat;
   selectedWorkoutId?: number | null;
   onSelectWorkout: (sessionId: number) => void;
+  onLongPressWorkout?: (workout: FinishedWorkout) => void;
 };
 
 /** Calendar labels use the training-day names saved with each workout. */
-export default function WorkoutCalendar({ workouts, dateFormat, selectedWorkoutId = null, onSelectWorkout }: Props) {
+export default function WorkoutCalendar({ workouts, dateFormat, selectedWorkoutId = null, onSelectWorkout, onLongPressWorkout }: Props) {
   const [month, setMonth] = useState(() => {
     const latest = new Date(workouts[0].finishTime);
     return new Date(latest.getFullYear(), latest.getMonth(), 1, 12);
@@ -68,6 +69,7 @@ export default function WorkoutCalendar({ workouts, dateFormat, selectedWorkoutI
                   accessibilityLabel={`View ${workout.trainingDayName} on ${formatWorkoutDate(workout.finishTime, dateFormat)}`}
                   accessibilityState={{ selected: workout.id === selectedWorkoutId }}
                   onPress={() => onSelectWorkout(workout.id)}
+                  onLongPress={() => onLongPressWorkout?.(workout)}
                   style={[styles.session, workout.id === selectedWorkoutId && styles.selectedSession]}>
                   <Text style={styles.badge}>{workout.trainingDayName}</Text>
                 </Pressable>)}

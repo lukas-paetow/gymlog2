@@ -3,6 +3,7 @@ import Slider from '@react-native-community/slider';
 import { Fragment, useEffect, useRef, useState } from 'react'; import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, listSavedSessionSets, saveCompletedSet } from '../database';
+import PersonalRecordCelebration from '../components/PersonalRecordCelebration';
 import type { TrainingDayExercise } from '../database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveSession'>;
@@ -19,6 +20,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
   const [setDrafts, setSetDrafts] = useState<Record<number, SetDraft[]>>({}); // number is like a lookup key, an ID for the setDraft
   const [completedExerciseIds, setCompletedExerciseIds] = useState<number[]>([]);
   const [skippedExerciseIds, setSkippedExerciseIds] = useState<number[]>([]);
+  const [recordCount, setRecordCount] = useState(0);
   const [isSavingSet, setIsSavingSet] = useState(false);
   const savingSetRef = useRef(false); // Block repeat presses immediately, before React rerenders.
   const [exercisePositions, setExercisePositions] = useState<Record<number, number>>({});
@@ -41,6 +43,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
       setSkippedExerciseIds([]);
       setIsFinished(false);
       setExercisePositions({});
+      setRecordCount(0);
 
       try {
         const db = await initializeDatabase();
@@ -150,7 +153,13 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
     setIsSavingSet(true);
     try {
       const db = await initializeDatabase();
-      await saveCompletedSet(db, sessionId, exercise, workoutExercisePosition, index, set.reps, weight);
+      const result = await saveCompletedSet(db, sessionId, exercise, workoutExercisePosition, index, set.reps, weight);
+      if (result.isPersonalRecord) {
+        const nextReps = set.reps + 1;
+        setRecordCount(current => current + 1);
+        setExercises(current => current.map(item => item.id === exerciseId
+          ? { ...item, prescribedRepsFirstSet: nextReps } : item));
+      }
       setExercisePositions(current => ({ ...current, [exerciseId]: workoutExercisePosition }));
       setSetDrafts(current => ({
         ...current,
@@ -306,10 +315,10 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                     </View>
                   ) : (
                     <>
-                      <Text>{exercise.prescribedSets} prescribed sets</Text>
-                      <Text>First-set reps: {exercise.prescribedRepsFirstSet}</Text>
+                      <Text>{exercise.prescribedSets} sets</Text>
                       {exercise.prescribedWeightFirstSet !== null && (
-                        <Text>First-set weight: {exercise.prescribedWeightFirstSet} kg</Text>
+                      <Text>{exercise.prescribedWeightFirstSet} kg {exercise.prescribedRepsFirstSet} reps
+                      </Text>
                       )}
                     </>
                   )}
@@ -406,6 +415,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
         </>
       )}
     </ScrollView>
+    <PersonalRecordCelebration trigger={isFinished ? 0 : recordCount} />
     <Modal visible={isFinished} transparent animationType="fade" onRequestClose={closeSummary}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 }}>
         <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, maxHeight: '85%', gap: 16 }}>
