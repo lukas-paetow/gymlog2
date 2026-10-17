@@ -224,3 +224,21 @@ prescriptions/other days, retry suppression, rollback, and deleted-day handling.
 Finished-workout deletion tests cover card/calendar confirmation, cancel, selected
 card removal, failure retention, repeat-press guards, finished-session validation,
 child-row deletion order, preserved other history/plans, and transaction rollback.
+
+Weight controls: `weightOptions.test.ts` checks increment generation, moving windows, and normalization;
+`weightEditors.test.tsx` covers editing/copying/saving and failures;
+`weightPicker.test.tsx` covers wheel selection and manual entry with the native
+wheel mocked. Database tests exercise storage, copies, cascading deletion and
+transaction rollback. Screen tests cover configured exercise creation and extra
+sets with collapsed completion disabled. Check native wheel scrolling/long-press
+behavior manually in Expo; Jest does not simulate native gestures.
+
+Progress tests use the real shared weight-picker component with the external
+wheel mocked. They check recorded-only values (including zero and assistance),
+the maximum cap, no manual-entry dialog, point updates, and selection retention
+when switching between reps and volume.
+
+Drag tests mock native Sortables/Reanimated/Worklets boundaries in
+`__tests__/support/gestures.tsx`, while checking our ordering callbacks and real
+SQLite persistence. Native dragging, tap-versus-hold, and auto-scroll are manual
+Expo checks. The editor’s prescription gesture is now tap; long press reorders.

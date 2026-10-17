@@ -24,3 +24,15 @@ test('thins ticks and labels when many days share a narrow plot', () => {
   const narrow = buildDateAxis(timestamp('2026-01-01T12:00:00'), timestamp('2026-12-31T12:00:00'), 120);
   expect(narrow.ticks.length).toBeLessThan(50);
 });
+
+test('long histories show year markers and hide day ticks and month labels', () => {
+  const axis = buildDateAxis(timestamp('2024-04-25T12:00:00'), timestamp('2026-10-16T12:00:00'), 300);
+  expect(axis.ticks).toEqual([]);
+  expect(axis.years.map(year => year.label)).toEqual(['2024', '2025', '2026']);
+  expect(axis.years.every(year => year.showLabel)).toBe(true);
+  expect(axis.years[1].x).toBe(axis.position(timestamp('2025-01-01T00:00:00')));
+  expect(axis.months.every(month => !month.showLabel)).toBe(true);
+  const short = buildDateAxis(timestamp('2025-12-29T12:00:00'), timestamp('2026-01-05T12:00:00'), 300);
+  expect(short.years).toEqual([]);
+  expect(short.ticks.length).toBeGreaterThan(0);
+});

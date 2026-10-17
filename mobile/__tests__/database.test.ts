@@ -80,8 +80,8 @@ describe('initialization and current baseline', () => {
     expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).toEqual([]);
     await database.initializeDatabase();
     expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(row => row.name)).toEqual([
-      'app_settings', 'day_exercises', 'exercises', 'logged_exercises',
-      'logged_sessions', 'logged_sets', 'routines', 'training_days',
+      'app_settings', 'day_exercises', 'exercise_weight_increments', 'exercise_weights', 'exercises', 'logged_exercise_annotations', 'logged_exercises',
+      'logged_sessions', 'logged_set_exclusions', 'logged_sets', 'routines', 'training_days',
     ]);
     expect(count('routines')).toBe(0);
     expect(fixture.connection.prepare('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 });
@@ -555,4 +555,260 @@ describe('deleting finished workouts', () => {
     expect(count('logged_exercises')).toBe(1);
     expect(count('logged_sessions')).toBe(1);
   });
+});
+
+describe('exercise available weights', () => {
+  beforeEach(async () => { await database.initializeDatabase(); });
+  test('saves normalized weights with an exercise, copies independently, and deletes weights with the library entry', async () => {
+    const curls = await database.insertExercise(fixture.db, 'Curls', [10, 4, 4, 17.5, -5]);
+    expect(await database.listExerciseWeights(fixture.db, curls)).toEqual([-5, 4, 10, 17.5]);
+    const rows = await database.insertExercise(fixture.db, 'Rows', await database.listExerciseWeights(fixture.db, curls));
+    await database.setExerciseWeights(fixture.db, curls, [20, 12, 20]);
+    expect(await database.listExerciseWeights(fixture.db, curls)).toEqual([12, 20]);
+    expect(await database.listExerciseWeights(fixture.db, rows)).toEqual([-5, 4, 10, 17.5]);
+    await database.setExerciseWeights(fixture.db, rows, []);
+    expect(await database.listExerciseWeights(fixture.db, rows)).toEqual([]);
+    await database.deleteExercise(fixture.db, curls);
+    expect(await database.listExerciseWeights(fixture.db, curls)).toEqual([]);
+    expect(count('exercise_weights')).toBe(0);
+  });
+  test('rejects invalid weights and missing exercises, and rolls back a failed replacement or creation', async () => {
+    await expect(database.insertExercise(fixture.db, 'Bad', [NaN])).rejects.toThrow();
+    expect(count('exercises')).toBe(0);
+    await expect(database.setExerciseWeights(fixture.db, 999, [10])).rejects.toThrow('Exercise not found');
+    const id = await database.insertExercise(fixture.db, 'Curls', [4]);
+    await expect(database.setExerciseWeights(fixture.db, id, [Infinity])).rejects.toThrow();
+    fixture.connection.exec(`CREATE TRIGGER reject_weight BEFORE INSERT ON exercise_weights
+      BEGIN SELECT RAISE(ABORT, 'weight failed'); END`);
+    await expect(database.setExerciseWeights(fixture.db, id, [10])).rejects.toThrow('weight failed');
+    expect(await database.listExerciseWeights(fixture.db, id)).toEqual([4]);
+    await expect(database.insertExercise(fixture.db, 'Rows', [10])).rejects.toThrow('weight failed');
+    expect(count('exercises')).toBe(1);
+  });
+});
+
+
+test('weight increment rules persist, copy independently, replace, and cascade', async () => {
+  await database.initializeDatabase();
+  const rules = [{ start: 10, increment: 2 }, { start: 4, increment: 1 }];
+  const id = await database.insertExercise(fixture.db, 'Increment exercise', [17.5], rules);
+  const profile = await database.getExerciseWeightOptions(fixture.db, id);
+  expect(profile).toEqual({ weights: [17.5], increments: [rules[1], rules[0]] });
+  const copied = await database.insertExercise(fixture.db, 'Copy exercise', profile.weights, profile.increments);
+  await database.setExerciseWeights(fixture.db, id, [], [{ start: -20, increment: 2.5 }]);
+  expect((await database.getExerciseWeightOptions(fixture.db, id)).increments).toEqual([{ start: -20, increment: 2.5 }]);
+  expect(await database.getExerciseWeightOptions(fixture.db, copied)).toEqual(profile);
+  await expect(database.setExerciseWeights(fixture.db, id, [], [{ start: 0, increment: 0 }])).rejects.toThrow();
+  await expect(database.insertExercise(fixture.db, 'Invalid increments', [], [{ start: NaN, increment: 1 }])).rejects.toThrow();
+  await database.deleteExercise(fixture.db, id);
+  expect(await database.getExerciseWeightOptions(fixture.db, id)).toEqual({ weights: [], increments: [] });
+  fixture.connection.exec(`CREATE TRIGGER reject_increment BEFORE INSERT ON exercise_weight_increments
+    BEGIN SELECT RAISE(ABORT, 'increment failed'); END`);
+  await expect(database.setExerciseWeights(fixture.db, copied, [99], [{ start: 0, increment: 5 }])).rejects.toThrow('increment failed');
+  expect(await database.getExerciseWeightOptions(fixture.db, copied)).toEqual(profile);
+  await expect(database.insertExercise(fixture.db, 'Failed increment', [99], [{ start: 0, increment: 5 }])).rejects.toThrow('increment failed');
+  expect((await database.listExercises(fixture.db)).map(row => row.name)).not.toContain('Failed increment');
+  await database.setExerciseWeights(fixture.db, copied, []);
+  expect((await database.getExerciseWeightOptions(fixture.db, copied)).increments).toEqual([]);
+});
+
+
+test('last weights use the latest saved set at each position and exclude the current workout', async () => {
+  await database.initializeDatabase();
+  const { day, exercise, sessionId } = await plan();
+  expect(await database.listLastSetWeights(fixture.db, sessionId)).toEqual([]);
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 7, -15);
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 6, 0);
+  const next = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, next, exercise, 0, 0, 8, -10);
+  // Sets count immediately, even before finishing their workout.
+  expect((await database.listLastSetWeights(fixture.db, -1)).find(row => row.setPosition === 0)?.weight).toBe(-10);
+  const nullSet = await database.saveCompletedSet(fixture.db, next, exercise, 0, 1, 7, 10);
+  await fixture.db.runAsync('UPDATE logged_sets SET weight = NULL WHERE id = ?', nullSet.id);
+  const otherId = await database.insertExercise(fixture.db, 'Other exercise');
+  await database.saveCompletedSet(fixture.db, next, { ...exercise, id: otherId }, 1, 0, 5, 100);
+  const current = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, current, exercise, 0, 0, 9, 200);
+  const old = await database.createLoggedSession(fixture.db, day.id);
+  await fixture.db.runAsync("UPDATE logged_sessions SET start_time = '2000-01-01T00:00:00.000Z' WHERE id = ?", old);
+  await database.saveCompletedSet(fixture.db, old, exercise, 0, 0, 5, 400);
+  // Importing older history later must not replace a more recent workout's weight.
+  const weights = await database.listLastSetWeights(fixture.db, current);
+  expect(weights.filter(row => row.exerciseId === exercise.id).sort((a, b) => a.setPosition - b.setPosition)).toEqual([
+    { exerciseId: exercise.id, setPosition: 0, weight: -10 },
+    { exerciseId: exercise.id, setPosition: 1, weight: -15 },
+    { exerciseId: exercise.id, setPosition: 2, weight: 0 },
+  ]);
+  expect(weights.find(row => row.exerciseId === otherId)?.weight).toBe(100);
+});
+
+
+describe('exercise annotations and tracking exclusions', () => {
+  test('metadata saves before performance, restores, and does not create workout history by itself', async () => {
+    await database.initializeDatabase();
+    const { sessionId, exercise } = await plan();
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: '  Unexpected pain  ', excludeAll: false, excludedPositions: [0, 2, 2] });
+    const [note] = await database.listExerciseAnnotations(fixture.db, sessionId);
+    expect(note).toMatchObject({ id: exercise.id, comment: 'Unexpected pain', excludeAll: false, excludedPositions: [0, 2] });
+    expect(await database.listSavedSessionSets(fixture.db, sessionId)).toEqual([]);
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: '', excludeAll: true, excludedPositions: [] });
+    expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0]).toMatchObject({ comment: '', excludeAll: true, excludedPositions: [] });
+    await database.deleteExercise(fixture.db, exercise.id);
+    expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0]).toMatchObject({ id: -note.loggedExerciseId, exerciseId: null });
+    await database.finishLoggedSession(fixture.db, sessionId);
+    expect(await database.listFinishedWorkouts(fixture.db)).toEqual([]);
+  });
+  test('selective exclusions remove sets from PRs and plots but preserve history and weight defaults', async () => {
+    await database.initializeDatabase();
+    const { sessionId, exercise, day } = await plan();
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 3, 0, 8, 20);
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 3, 1, 15, 25);
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Pain', excludeAll: false, excludedPositions: [1] });
+    expect((await database.listExercisesWithRecords(fixture.db))[0]).toMatchObject({ heaviestWeight: 20, repsAtHeaviestWeight: 8 });
+    const skippedId = await database.insertExercise(fixture.db, 'Skipped exercise');
+    await database.saveExerciseAnnotation(fixture.db, sessionId, { ...exercise, id: skippedId, name: 'Skipped exercise' }, { comment: 'Stopped due to pain', excludeAll: false, excludedPositions: [] });
+    const emptyId = await database.insertExercise(fixture.db, 'Empty annotation');
+    await database.saveExerciseAnnotation(fixture.db, sessionId, { ...exercise, id: emptyId }, { comment: '', excludeAll: true, excludedPositions: [] });
+    await database.finishLoggedSession(fixture.db, sessionId);
+    expect((await database.listFinishedWorkouts(fixture.db))[0].exerciseNotes).toEqual([{ exerciseName: 'Skipped exercise', comment: 'Stopped due to pain' }]);
+    expect((await database.listExerciseProgress(fixture.db, exercise.id)).map(set => set.weight)).toEqual([20]);
+    expect((await database.listFinishedWorkouts(fixture.db))[0].sets[1]).toMatchObject({ weight: 25, exerciseComment: 'Pain', excludedFromTracking: true });
+    expect((await database.listLastSetWeights(fixture.db, -1)).find(set => set.setPosition === 1)?.weight).toBe(25);
+    const next = await database.createLoggedSession(fixture.db, day.id);
+    const baseline = await database.saveCompletedSet(fixture.db, next, exercise, 0, 0, 10, 25);
+    expect(baseline.isPersonalRecord).toBe(false);
+    const record = await database.saveCompletedSet(fixture.db, next, exercise, 0, 1, 9, 20);
+    expect(record.isPersonalRecord).toBe(true);
+  });
+  test('all sets applies to future added sets and can be reversed before finishing; annotation rows cascade on workout deletion', async () => {
+    await database.initializeDatabase();
+    const { sessionId, exercise } = await plan();
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Bad day', excludeAll: true, excludedPositions: [] });
+    await database.saveCompletedSet(fixture.db, sessionId, exercise, 5, 0, 8, 20);
+    const result = await database.saveCompletedSet(fixture.db, sessionId, exercise, 5, 4, 20, 20);
+    expect(result.isPersonalRecord).toBe(false);
+    expect((await database.listExercisesWithRecords(fixture.db))[0].heaviestWeight).toBeNull();
+    expect(fixture.connection.prepare('SELECT position FROM logged_exercises').get()).toEqual({ position: 5 });
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Better', excludeAll: false, excludedPositions: [] });
+    expect((await database.listExercisesWithRecords(fixture.db))[0]).toMatchObject({ heaviestWeight: 20, repsAtHeaviestWeight: 20 });
+    await database.finishLoggedSession(fixture.db, sessionId);
+    expect(await database.listExerciseProgress(fixture.db, exercise.id)).toHaveLength(2);
+    await database.deleteFinishedWorkout(fixture.db, sessionId);
+    expect(count('logged_exercise_annotations')).toBe(0);
+    expect(count('logged_set_exclusions')).toBe(0);
+  });
+  test('validates active workouts and set numbers and rolls back partial metadata updates', async () => {
+    await database.initializeDatabase();
+    const { sessionId, exercise } = await plan();
+    const note = { comment: 'Saved', excludeAll: false, excludedPositions: [0] };
+    await expect(database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { ...note, excludedPositions: [-1] })).rejects.toThrow('Invalid set position');
+    await expect(database.saveExerciseAnnotation(fixture.db, 999, exercise, note)).rejects.toThrow('Workout is not active');
+    await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, note);
+    fixture.connection.exec(`CREATE TRIGGER reject_exclusion BEFORE INSERT ON logged_set_exclusions BEGIN SELECT RAISE(ABORT, 'exclusion failed'); END`);
+    await expect(database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { ...note, comment: 'Changed', excludedPositions: [1] })).rejects.toThrow('exclusion failed');
+    expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0]).toMatchObject(note);
+    await database.finishLoggedSession(fixture.db, sessionId);
+    await expect(database.saveExerciseAnnotation(fixture.db, sessionId, exercise, note)).rejects.toThrow('Workout is not active');
+  });
+});
+
+
+test('last rep defaults use the latest matching weight and position outside the active workout', async () => {
+  await database.initializeDatabase();
+  const { day, exercise, sessionId } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 6, 20);
+  const second = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, second, exercise, 0, 1, 7, 20);
+  const third = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, third, exercise, 0, 1, 8, 25);
+  const active = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, active, exercise, 0, 1, 99, 20);
+  expect((await database.listLastSetReps(fixture.db, active)).sort((a, b) => a.weight - b.weight)).toEqual([
+    { exerciseId: exercise.id, setPosition: 1, weight: 20, reps: 7 },
+    { exerciseId: exercise.id, setPosition: 1, weight: 25, reps: 8 },
+  ]);
+});
+
+test('manual custom weights persist atomically with completed sets and do not duplicate', async () => {
+  await database.initializeDatabase();
+  const { sessionId, exercise } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -17.5, true);
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 6, -17.5, true);
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 5, 20);
+  expect(await database.listExerciseWeights(fixture.db, exercise.id)).toEqual([-17.5]);
+  fixture.connection.exec(`CREATE TRIGGER reject_custom_weight BEFORE INSERT ON exercise_weights
+    BEGIN SELECT RAISE(ABORT, 'custom weight failed'); END`);
+  await expect(database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 3, 5, 7.5, true)).rejects.toThrow('custom weight failed');
+  expect(await database.listSavedSessionSets(fixture.db, sessionId)).toHaveLength(3);
+  expect(await database.listExerciseWeights(fixture.db, exercise.id)).toEqual([-17.5]);
+});
+
+test('progression mode persists and fixed mode records PRs without updating prescribed reps', async () => {
+  await database.initializeDatabase();
+  expect(await database.getProgressionMode(fixture.db)).toBe('hypertrophy');
+  const { sessionId, exercise, day } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+  await database.setProgressionMode(fixture.db, 'fixed');
+  expect(await database.getProgressionMode(fixture.db)).toBe('fixed');
+  const fixed = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20);
+  expect(fixed.isPersonalRecord).toBe(true);
+  expect(fixed.prescribedReps).toBeUndefined();
+  expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(8);
+  await database.setProgressionMode(fixture.db, 'hypertrophy');
+  const auto = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 11, -20);
+  expect(auto.prescribedReps).toBe(12);
+  expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(12);
+});
+
+
+test('logged exercise names follow library renames and fall back to snapshots after deletion', async () => {
+  await database.initializeDatabase();
+  const { sessionId, exercise } = await plan();
+  await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Note', excludeAll: false, excludedPositions: [] });
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, 20);
+  await database.finishLoggedSession(fixture.db, sessionId);
+  await fixture.db.runAsync('UPDATE exercises SET name = ? WHERE id = ?', 'Renamed dips', exercise.id);
+  expect((await database.listSavedSessionSets(fixture.db, sessionId))[0].name).toBe('Renamed dips');
+  expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0].name).toBe('Renamed dips');
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets[0].exerciseName).toBe('Renamed dips');
+  expect(await database.listExerciseProgress(fixture.db, exercise.id)).toHaveLength(1);
+  await database.deleteExercise(fixture.db, exercise.id);
+  expect((await database.listSavedSessionSets(fixture.db, sessionId))[0].name).toBe(exercise.name);
+  expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0].name).toBe(exercise.name);
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets[0].exerciseName).toBe(exercise.name);
+});
+
+test('routine management keeps one active routine and copied days have independent prescriptions', async () => {
+  await database.initializeDatabase();
+  const { routineId, day, exercise } = await plan();
+  const older = await database.insertRoutine(fixture.db, 'Older routine', [{ name: 'Old leg day', exercises: [exercise] }]);
+  expect(await database.getActiveRoutineId(fixture.db)).toBeNull();
+  await database.setActiveRoutine(fixture.db, routineId);
+  await database.setActiveRoutine(fixture.db, older);
+  expect(await database.getActiveRoutineId(fixture.db)).toBe(older);
+  expect((await database.listReusableTrainingDays(fixture.db)).map(row => row.name)).toContain('Old leg day');
+  const copied = await database.insertRoutine(fixture.db, 'Copy', [{ name: day.name, exercises: await database.listExercisesInTrainingDay(fixture.db, day.id) }]);
+  const [copyDay] = await database.listTrainingDays(fixture.db, copied);
+  expect(copyDay.id).not.toBe(day.id);
+  await database.updateExercisePrescription(fixture.db, copyDay.id, { ...exercise, prescribedRepsFirstSet: 12, prescribedWeightFirstSet: -17.5 });
+  expect((await database.listExercisesInTrainingDay(fixture.db, copyDay.id))[0].prescribedRepsFirstSet).toBe(12);
+  expect((await database.listExercisesInTrainingDay(fixture.db, day.id))[0].prescribedRepsFirstSet).toBe(8);
+  await database.deleteRoutine(fixture.db, older);
+  expect(await database.getActiveRoutineId(fixture.db)).toBeNull();
+});
+
+test('sortable orders persist without changing prescriptions and reject stale exercise lists', async () => {
+  await database.initializeDatabase();
+  const { day, exercise } = await plan();
+  const second = await database.insertExercise(fixture.db, 'Rows');
+  await fixture.db.runAsync('INSERT INTO day_exercises (training_day_id, exercise_id, position) VALUES (?, ?, ?)', day.id, second, 1);
+  await database.setStartScreenOrder(fixture.db, ['Settings', 'Session', 'Routines']);
+  expect(await database.getStartScreenOrder(fixture.db)).toEqual(['Settings', 'Session', 'Routines']);
+  await database.reorderTrainingDayExercises(fixture.db, day.id, [second, exercise.id]);
+  const entries = await database.listExercisesInTrainingDay(fixture.db, day.id);
+  expect(entries.map(entry => entry.id)).toEqual([second, exercise.id]);
+  expect(entries[1].prescribedRepsFirstSet).toBe(8);
+  await expect(database.reorderTrainingDayExercises(fixture.db, day.id, [second, second])).rejects.toThrow();
+  expect((await database.listExercisesInTrainingDay(fixture.db, day.id)).map(entry => entry.id)).toEqual([second, exercise.id]);
 });

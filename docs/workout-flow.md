@@ -206,7 +206,7 @@ session to WorkoutHistoryScreen, which owns selection state and moves that
 existing log card directly below the calendar. Other cards stay below it in
 their existing order. Both label and card indicate selection. No new query is needed.
 
-A newly saved same-weight rep PR also updates this training day’s exercise target
+In Hypertrophy (+1 rep) mode, a newly saved same-weight rep PR updates this training day’s exercise target
 to reps + 1 in the same transaction. The active target updates after success.
 Historical logged prescriptions and other training-day plans are unchanged.
 
@@ -219,3 +219,122 @@ screen removes its card/calendar entry and clears that selection. Failure retain
 the displayed history. Library exercises and training plans are not deleted.
 Current PR queries and plots use the remaining sets on their next focus reload.
 Stored historical PR deltas and prescribed targets are not rewritten by deletion.
+
+
+## Initial weight selection
+
+ActiveSessionScreen loads `listLastSetWeights()` once while loading the workout.
+The query picks the latest known weight for each exercise ID and zero-based set
+position, across training days, excluding the current session. Saved sets count
+immediately, including unfinished workouts. Recency follows workout start time,
+then session/set IDs to break ties; importing old demo history later does not
+replace newer workout values. Null legacy weights are ignored.
+
+Completed rows restored from the current session retain their saved values.
+Uncompleted rows start with their historical position's weight; without history,
+the first set falls back to its prescribed weight and later sets remain unset.
+Extra sets also use their position's historical weight when present, otherwise
+they copy the previous set's weight. This only initializes editable drafts; it
+neither saves sets nor changes prescriptions, and later renders do not reset edits.
+
+Progress uses the shared WeightPicker in selection-only mode. Its finite list is
+the exercise’s recorded weights, capped at the heaviest recorded weight. Wheel
+selection filters the existing history and updates plot points without another
+database query. Volume mode hides the picker and preserves its selection.
+
+
+## Exercise comments and tracking exclusions
+
+Long-press an active exercise card (including a completed card) for Add comment
+or Exclude sets from tracking. ExerciseOptionsModal owns temporary edits; Save
+calls saveExerciseAnnotation, which persists metadata atomically. Failed saves
+keep the editor open. Individual choices apply by set position; All sets also
+covers subsequently added sets. Skip remains inside the tracking dialog before
+any set is completed.
+
+Annotations are separate from performance: saving a note creates metadata but
+no completed sets. The first completed set determines the exercise's workout
+position. ActiveSessionScreen loads annotations on resume. History shows comments
+and excluded-set labels, including notes on exercises with no completed sets when
+other exercises in that workout were performed. A workout with no sets stays out
+of history.
+
+Exclusions filter library PRs, the baseline for newly saved PRs, and progress data
+(including volume/top-set modes). They preserve logged reps/weights and future
+weight defaults. Earlier PR flags and prescribed targets are not retroactively
+rewritten when a previously logged set is excluded or re-included.
+
+
+For sets after the first, `listLastSetReps()` supplies the most recent reps for
+that exact exercise, set position and weight, excluding the current workout.
+These defaults include tracking-excluded sets, as do weight defaults. They load
+once with the workout; changing weight uses this cached history rather than
+querying SQLite on every wheel movement. Saved rows remain unchanged. Manual
+slider changes persist until a different weight with a historical match is chosen.
+No match preserves the current slider value; initial unmatched later sets remain
+unset. Added sets use matching historical reps, falling back to the previous set.
+The first set continues to use its prescribed reps. The slider range includes
+historical rep values above 30 so these defaults remain adjustable.
+
+
+Manual weight entry marks the set draft to remember that weight. Completing the
+set adds it to `exercise_weights` in the same transaction as the logged set;
+duplicates are ignored. The active screen refreshes its local weight list only
+after success. Cancellation, unfinished drafts and failed saves do not add weights.
+This stores an individual custom weight, preserving existing increment rules.
+
+
+Settings stores progression_mode ('hypertrophy' or 'fixed') in app_settings;
+missing/unrecognized values default to hypertrophy. Saving a PR checks this mode
+in the set transaction. Fixed mode leaves prescriptions unchanged while keeping
+PR metadata and celebrations. The save result includes prescribedReps only when
+an automatic target update occurred, so the active screen follows the database.
+This setting currently controls PR-driven targets, not last-performance defaults.
+
+Logged exercise names prefer the current library name via exercise_id; saved
+exercise_name is the fallback after library deletion. History cards, notes and
+resumed workouts use this rule. Progress groups by exercise ID and receives the
+current name from the library when opened, so renaming does not split history.
+
+
+## Routine management
+
+One `active_routine_id` value in app_settings represents the selected routine.
+getActiveRoutineId validates it against existing routines; setActiveRoutine
+validates and replaces the selection atomically. Deleting that routine clears the
+setting, preventing a later reused SQLite ID from becoming active accidentally.
+RoutineScreen pins the active routine above Inactive routines; workout selection
+also shows it first. Activation changes neither history nor existing workouts.
+
+Viewed days render through TrainingDayTable. Tap opens PrescriptionEditor
+inside the existing viewing modal. updateExercisePrescription validates sets,
+first-set reps, and signed weight, then updates only the matching day/exercise.
+Historical logged prescriptions remain snapshots.
+
+Copy loads source days/exercises into a new, editable routine draft without
+routine/day IDs. Saving uses insertRoutine, so copies share library exercise
+identities but not day prescriptions. Load existing training day queries current
+saved days across all routines, filters names locally, and opens an independent
+day draft in the existing editor. Source routine names disambiguate duplicate day
+names. Deleted days are not retained as a separate template archive.
+
+
+## Drag ordering
+
+react-native-sortables provides gesture recognition and animated rearrangement,
+using Reanimated and Gesture Handler. Sortable.Touchable separates tapping from
+holding: home taps navigate; viewed exercise-row taps edit prescriptions; holds
+drag. The draft editor uses Sortable.Handle so dragging does not interfere with
+text entry. Viewed-day and home orders persist on drop; unsaved drafts persist
+only when Save routine is pressed.
+
+Home order is a JSON array of route keys in the existing settings table. Unknown
+routes are ignored and new options append after saved options. Day exercise
+reordering validates complete membership and updates existing positions in one
+transaction, using temporary negative positions to avoid unique-index conflicts.
+Prescriptions and logged history are untouched. A failed save restores the prior
+visible order and displays an error. No database migration is needed.
+
+Native drag behavior is checked by Lukas in Expo. Jest uses a gesture/animation
+boundary mock in __tests__/support/gestures.tsx; focused tests verify save callbacks
+and SQLite ordering rather than simulating finger movement.

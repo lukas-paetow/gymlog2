@@ -2,6 +2,8 @@ process.env.TZ = 'Europe/Berlin';
 
 module.exports = {
   preset: 'jest-expo',
+  setupFiles: ['react-native-gesture-handler/jestSetup'],
+  setupFilesAfterEnv: ['<rootDir>/__tests__/support/gestures.tsx'],
   testMatch: ['<rootDir>/__tests__/**/*.test.ts', '<rootDir>/__tests__/**/*.test.tsx'],
   maxWorkers: 2,
   collectCoverageFrom: [

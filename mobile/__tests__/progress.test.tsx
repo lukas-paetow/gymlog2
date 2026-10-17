@@ -6,6 +6,10 @@ import * as database from '../database';
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void) => require('react').useEffect(effect, [effect]),
 }));
+jest.mock('@quidone/react-native-wheel-picker', () => {
+  const React = require('react');
+  return (props: object) => React.createElement(require('react-native').View, { ...props, testID: 'weight-wheel' });
+});
 jest.mock('../database', () => ({ initializeDatabase: jest.fn(), listExerciseProgress: jest.fn(), getDateFormat: jest.fn() }));
 // Keep our chart adapter real; replace the external native drawing boundary.
 jest.mock('react-native-gifted-charts', () => ({
@@ -34,8 +38,13 @@ test('selects heaviest weight initially and switches to assistance, keeping best
   expect(db.listExerciseProgress).toHaveBeenCalledWith(expect.anything(), 7);
   await fireEvent(screen.getByTestId('progress-chart'), 'layout', { nativeEvent: { layout: { width: 400 } } });
   expect(screen.getByTestId('line-chart').props.data.map((point: { value: number }) => point.value)).toEqual([4]);
+  expect(screen.getByTestId('weight-wheel').props.data).toEqual([{ value: '-20', label: '-20' }, { value: '0', label: '0' }]);
+  await fireEvent(screen.getByLabelText('Plot weight in kilograms'), 'longPress');
+  expect(screen.queryByText('Enter weight (kg)')).toBeNull();
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '100' } });
+  expect(screen.getByTestId('weight-wheel').props.value).toBe('0');
   const initialX = screen.getByTestId('line-chart').props.data[0].x;
-  await fireEvent.press(screen.getByRole('button', { name: 'Select -20 kg' }));
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '-20' } });
   // Weight changes keep the scale while updating the observations.
   expect(screen.getByTestId('line-chart').props.maxValue).toBe(10);
   expect(screen.getByTestId('line-chart').props.data.map((point: { value: number }) => point.value)).toEqual([8]);
@@ -100,7 +109,7 @@ test('all sets retain their set numbers and colors; top mode chooses before filt
   ]);
   await render(<ProgressScreen {...props} />);
   await screen.findByText('All completed sets at this weight.');
-  await fireEvent.press(screen.getByRole('button', { name: 'Select 60 kg' }));
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '60' } });
   await fireEvent(screen.getByTestId('progress-chart'), 'layout', { nativeEvent: { layout: { width: 400 } } });
   const data = screen.getByTestId('line-chart').props.data;
   expect(data.map((set: { value: number }) => set.value)).toEqual([8, 10, 7]);
@@ -112,7 +121,7 @@ test('all sets retain their set numbers and colors; top mode chooses before filt
   await fireEvent.press(screen.getByRole('button', { name: 'Show top sets only' }));
   expect(screen.getByTestId('line-chart').props.data.map((set: { value: number }) => set.value)).toEqual([10]);
   expect(screen.queryByText('Set 2')).toBeNull();
-  await fireEvent.press(screen.getByRole('button', { name: 'Select 50 kg' }));
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '50' } });
   expect(screen.getByText('No top sets at this weight.')).toBeVisible();
   await fireEvent.press(screen.getByRole('button', { name: 'Show all sets' }));
   expect(screen.getByText('03/10/2026: Set 3 · 12 reps')).toBeVisible();
@@ -126,12 +135,12 @@ test('volume combines weights per workout and top-only mode uses the heaviest se
     { id: 4, sessionId: 2, setPosition: 1, finishTime: '2026-10-03T12:00:00Z', weight: 50, reps: 6 },
   ]);
   await render(<ProgressScreen {...props} />);
-  await screen.findByRole('button', { name: 'Select 60 kg' });
-  await fireEvent.press(screen.getByRole('button', { name: 'Select 60 kg' }));
+  await screen.findByTestId('weight-wheel');
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '60' } });
   await fireEvent(screen.getByTestId('progress-chart'), 'layout', { nativeEvent: { layout: { width: 400 } } });
   await fireEvent.press(screen.getByRole('button', { name: 'Show volume' }));
   expect(screen.getByText('Volume (kg · reps)')).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Select 60 kg' })).toBeNull();
+  expect(screen.queryByTestId('weight-wheel')).toBeNull();
   expect(screen.queryByText('Set 1')).toBeNull();
   expect(screen.getByText('01/10/2026: 1000 kg · reps')).toBeVisible();
   expect(screen.getByTestId('line-chart').props.data.map((set: { value: number }) => set.value)).toEqual([1000, 700]);
@@ -146,6 +155,6 @@ test('volume combines weights per workout and top-only mode uses the heaviest se
   expect(screen.getByTestId('line-chart').props.data.map((set: { value: number }) => set.value)).toEqual([1000, 700]);
   await fireEvent.press(screen.getByRole('button', { name: 'Show reps' }));
   expect(screen.getByText('Reps at selected weight')).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Select 60 kg' })).toBeDisabled();
+  expect(screen.getByTestId('weight-wheel').props.value).toBe('60');
   expect(screen.getByTestId('line-chart').props.data.map((set: { value: number }) => set.value)).toEqual([10]);
 });

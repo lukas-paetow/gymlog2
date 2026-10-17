@@ -46,6 +46,11 @@ export default function ExerciseProgressChart({ points, domain, axisLabel = 'Rep
                 {month.showLabel && <SvgText x={month.labelX} y={HEIGHT + 44} fontSize={12}
                   fill="#6b7280" textAnchor="middle">{month.label}</SvgText>}
               </G>)}
+              {axis.years.map(year => <G key={year.label}>
+                <Line x1={year.x} x2={year.x} y1={0} y2={HEIGHT} stroke="#9ca3af" strokeWidth={1.5} />
+                {year.showLabel && <SvgText x={year.labelX} y={HEIGHT + 44} fontSize={12}
+                  fill="#6b7280" textAnchor="middle">{year.label}</SvgText>}
+              </G>)}
               {axis.ticks.map(tick => <G key={tick.x}>
                 <Line x1={tick.x} x2={tick.x} y1={HEIGHT} y2={HEIGHT + 5} stroke="#9ca3af" />
                 {tick.showLabel && <SvgText x={tick.x} y={HEIGHT + 20} fontSize={11}

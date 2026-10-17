@@ -1,17 +1,24 @@
-import { Alert, Button, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Button, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Fragment, useEffect, useRef, useState } from 'react'; import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, listSavedSessionSets, saveCompletedSet } from '../database';
+import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, getExerciseWeightOptions, listLastSetWeights, listLastSetReps, listExerciseAnnotations, saveExerciseAnnotation, listSavedSessionSets, saveCompletedSet } from '../database';
+import type { WeightOptions } from '../weightOptions';
+import ExerciseOptionsModal from '../components/ExerciseOptionsModal';
+import WeightPicker from '../components/WeightPicker';
 import PersonalRecordCelebration from '../components/PersonalRecordCelebration';
-import type { TrainingDayExercise } from '../database';
+import type { ExerciseAnnotation, LastSetReps, LastSetWeight, TrainingDayExercise } from '../database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveSession'>;
-type SetDraft = { reps: number | null; weight: string; completed: boolean };
+type SetDraft = { reps: number | null; weight: string; completed: boolean; rememberWeight?: boolean };
 
 export default function ActiveSessionScreen({ route, navigation }: Props) {
+  const [isWeightInteracting, setIsWeightInteracting] = useState(false);
   const { sessionId } = route.params; // braces unpack field from object route.params here. it's like route.params.sessionId
   const [dayName, setDayName] = useState('');
+  const [exerciseWeights, setExerciseWeights] = useState<Record<number, WeightOptions>>({});
+  const [lastSetReps, setLastSetReps] = useState<LastSetReps[]>([]);
+  const [lastSetWeights, setLastSetWeights] = useState<LastSetWeight[]>([]);
   const [exercises, setExercises] = useState<TrainingDayExercise[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +27,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
   const [setDrafts, setSetDrafts] = useState<Record<number, SetDraft[]>>({}); // number is like a lookup key, an ID for the setDraft
   const [completedExerciseIds, setCompletedExerciseIds] = useState<number[]>([]);
   const [skippedExerciseIds, setSkippedExerciseIds] = useState<number[]>([]);
+  const [annotations, setAnnotations] = useState<Record<number, ExerciseAnnotation>>({});
+  const [options, setOptions] = useState<{ exercise: TrainingDayExercise; mode: 'comment' | 'tracking' } | null>(null);
   const [recordCount, setRecordCount] = useState(0);
   const [isSavingSet, setIsSavingSet] = useState(false);
   const savingSetRef = useRef(false); // Block repeat presses immediately, before React rerenders.
@@ -44,6 +53,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
       setIsFinished(false);
       setExercisePositions({});
       setRecordCount(0);
+      setOptions(null);
+      setAnnotations({});
 
       try {
         const db = await initializeDatabase();
@@ -96,7 +107,34 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
           }
         }
 
+        const savedAnnotations = await listExerciseAnnotations(db, sessionId);
+        for (const note of savedAnnotations) {
+          if (!drafts[note.id]) {
+            rows.push(note);
+            addDrafts(note, note.prescribedSets);
+            if (note.exerciseId === null) readOnlyIds.push(note.id);
+          }
+        }
+        const lastWeights = await listLastSetWeights(db, sessionId);
+        for (const last of lastWeights) {
+          const draft = drafts[last.exerciseId]?.[last.setPosition];
+          if (draft && !draft.completed) draft.weight = String(last.weight);
+        }
+        const lastReps = await listLastSetReps(db, sessionId);
+        for (const exercise of rows) {
+          drafts[exercise.id].forEach((draft, index) => {
+            if (index > 0 && !draft.completed && draft.weight.trim()) {
+              draft.reps = lastReps.find(last => last.exerciseId === exercise.id && last.setPosition === index
+                && last.weight === Number(draft.weight))?.reps ?? null;
+            }
+          });
+        }
+        const weightOptions = await Promise.all(rows.map(exercise => getExerciseWeightOptions(db, exercise.id)));
         if (!cancelled) {
+          setLastSetWeights(lastWeights);
+          setLastSetReps(lastReps);
+          setAnnotations(Object.fromEntries(savedAnnotations.map(note => [note.id, note])));
+          setExerciseWeights(Object.fromEntries(rows.map((exercise, index) => [exercise.id, weightOptions[index]])));
           setDayName(session.trainingDayName);
           setExercises(rows);
           setSetDrafts(drafts);
@@ -119,15 +157,29 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
     return () => { cancelled = true; };
   }, [sessionId]);
 
-  function updateSet(exerciseId: number, index: number, changes: Partial<Pick<SetDraft, 'reps' | 'weight'>>) { // Partial Pick allows one or the other, optional
+  function openExerciseMenu(exercise: TrainingDayExercise) {
+    Alert.alert(exercise.name, undefined, [
+      { text: 'Add comment', onPress: () => setOptions({ exercise, mode: 'comment' }) },
+      { text: 'Exclude sets from tracking', onPress: () => setOptions({ exercise, mode: 'tracking' }) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  function updateSet(exerciseId: number, index: number, changes: Partial<Pick<SetDraft, 'reps' | 'weight' | 'rememberWeight'>>) { // Partial Pick allows one or the other, optional
     if (savingSetRef.current || isFinished || completedExerciseIds.includes(exerciseId) || skippedExerciseIds.includes(exerciseId)) return;
     setSetDrafts(current => {
       const sets = current[exerciseId];
       if (!sets || sets.findIndex(set => !set.completed) !== index) return current;
+      let defaults: Partial<SetDraft> = {};
+      if (index > 0 && changes.weight !== undefined && (!sets[index].weight.trim()
+        || Number(changes.weight.replace(',', '.')) !== Number(sets[index].weight.replace(',', '.')))) {
+        const weight = changes.weight.trim() ? Number(changes.weight.replace(',', '.')) : NaN;
+        defaults = { reps: lastSetReps.find(last => last.exerciseId === exerciseId && last.setPosition === index && last.weight === weight)?.reps ?? sets[index].reps };
+      }
       return {
         ...current,
         [exerciseId]: sets.map((set, position) => // use value of exerciseId as property name. might be like "12" here
-          position === index ? { ...set, ...changes } : set
+          position === index ? { ...set, ...defaults, ...changes } : set
         ),
       };
     });
@@ -153,10 +205,18 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
     setIsSavingSet(true);
     try {
       const db = await initializeDatabase();
-      const result = await saveCompletedSet(db, sessionId, exercise, workoutExercisePosition, index, set.reps, weight);
+      const result = await saveCompletedSet(db, sessionId, exercise, workoutExercisePosition, index, set.reps, weight, set.rememberWeight ?? false);
+      if (set.rememberWeight) {
+        setExerciseWeights(current => {
+          const profile = current[exerciseId] ?? { weights: [], increments: [] };
+          return { ...current, [exerciseId]: { ...profile, weights: [...new Set([...profile.weights, weight])].sort((a, b) => a - b) } };
+        });
+      }
       if (result.isPersonalRecord) {
-        const nextReps = set.reps + 1;
         setRecordCount(current => current + 1);
+      }
+      if (result.prescribedReps !== undefined) {
+        const nextReps = result.prescribedReps;
         setExercises(current => current.map(item => item.id === exerciseId
           ? { ...item, prescribedRepsFirstSet: nextReps } : item));
       }
@@ -240,7 +300,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
 
   return (
     <>
-    <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
+    <ScrollView scrollEnabled={!isWeightInteracting} contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
       {isLoading ? (
         <Text>Loading training day…</Text>
       ) : error !== null ? (
@@ -268,7 +328,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                   <Text style={{ fontSize: 16 }}>Remaining exercises:</Text>
                 </View>
               )}
-            <View
+            <Pressable accessible={false} disabled={isBusy || isFinished || exercise.id < 0}
+              onLongPress={() => openExerciseMenu(exercise)}
               style={{
                 padding: expandedExerciseId === exercise.id ? 20 : 16,
                 marginHorizontal: expandedExerciseId === exercise.id ? -4 : 0,
@@ -287,29 +348,23 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                   style={{ flex: 1 }}
                   accessibilityRole="button"
                   accessibilityLabel={exercise.name}
-                  disabled={isBusy || isFinished || completedExerciseIds.includes(exercise.id)}
+                  disabled={isBusy || isFinished || exercise.id < 0}
                   accessibilityState={{
                     expanded: expandedExerciseId === exercise.id,
-                    disabled: isBusy || isFinished || completedExerciseIds.includes(exercise.id),
+                    disabled: isBusy || isFinished || exercise.id < 0,
                   }}
-                  onPress={() => setExpandedExerciseId(current =>
-                    current === exercise.id ? null : exercise.id
-                  )}
+                  onPress={() => {
+                    if (!completedExerciseIds.includes(exercise.id)) setExpandedExerciseId(current => current === exercise.id ? null : exercise.id);
+                  }}
                   delayLongPress={500}
-                  onLongPress={() => {
-                    if (setDrafts[exercise.id]?.some(set => set.completed)) return;
-                    Alert.alert(exercise.name, undefined, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Skip exercise', onPress: () => completeExercise(exercise.id) },
-                    ]);
-                  }}
+                  onLongPress={() => openExerciseMenu(exercise)}
                 >
                   <Text style={{ fontSize: 20 }}>{exercise.name}</Text>
                   {completedExerciseIds.includes(exercise.id) ? (
                     <View style={{ marginTop: 6, gap: 4 }}>
                       {(setDrafts[exercise.id] ?? []).map((set, index) => set.completed && (
                         <Text key={index} style={{ fontSize: 12, color: '#374151' }}>
-                          Set {index + 1}: {set.reps} reps × {set.weight.trim().replace(',', '.')} kg
+                          Set {index + 1}: {set.reps} reps × {set.weight.trim().replace(',', '.')} kg{annotations[exercise.id]?.excludeAll || annotations[exercise.id]?.excludedPositions.includes(index) ? ' — Excluded from PRs and plots' : ''}
                         </Text>
                       ))}
                     </View>
@@ -327,14 +382,14 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Complete ${exercise.name}`}
-                  accessibilityState={{ disabled: isBusy || isFinished || completedExerciseIds.includes(exercise.id) }}
-                  disabled={isBusy || isFinished || completedExerciseIds.includes(exercise.id)}
+                  accessibilityState={{ disabled: isBusy || isFinished || completedExerciseIds.includes(exercise.id) || expandedExerciseId !== exercise.id }}
+                  disabled={isBusy || isFinished || completedExerciseIds.includes(exercise.id) || expandedExerciseId !== exercise.id}
                   onPress={() => completeExercise(exercise.id)}
                   style={({ pressed }) => ({
                     width: 100,
                     paddingVertical: 9,
                     borderRadius: 6,
-                    backgroundColor: completedExerciseIds.includes(exercise.id) ? '#6b7280' : '#2563eb',
+                    backgroundColor: completedExerciseIds.includes(exercise.id) ? '#6b7280' : expandedExerciseId !== exercise.id ? '#94a3b8' : '#2563eb',
                     opacity: pressed ? 0.8 : 1,
                   })}
                 >
@@ -345,14 +400,18 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                 </Pressable>
                 )}
               </View>
+              {!!annotations[exercise.id]?.comment && <Text style={{ marginTop: 8 }}>{annotations[exercise.id].comment}</Text>}
+              {annotations[exercise.id]?.excludeAll && <Text>All sets excluded from PRs and plots</Text>}
               {!completedExerciseIds.includes(exercise.id) && expandedExerciseId === exercise.id && (
                 <View style={{ marginTop: 12, gap: 12 }}>
                   {(setDrafts[exercise.id] ?? []).map((set, index, sets) => {
                     const isEditable = !isBusy && !isFinished && !completedExerciseIds.includes(exercise.id)
                       && index === sets.findIndex(item => !item.completed);
+                    const previousReps = lastSetReps.find(last => last.exerciseId === exercise.id && last.setPosition === index
+                      && last.weight === Number(set.weight.replace(',', '.')))?.reps ?? 0;
                     return (
                       <View key={index} style={{ borderTopWidth: 1, borderColor: '#cbd5e1', paddingTop: 12, opacity: isEditable ? 1 : 0.5 }}>
-                        <Text>Set {index + 1}{set.completed ? ' — Completed' : !isEditable ? ' — Locked' : ''}</Text>
+                        <Text>Set {index + 1}{set.completed ? ' — Completed' : !isEditable ? ' — Locked' : ''}{annotations[exercise.id]?.excludeAll || annotations[exercise.id]?.excludedPositions.includes(index) ? ' — Excluded from PRs and plots' : ''}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                           <View style={{ flex: 1 }}>
                             <Text>Reps: {set.reps ?? '—'}</Text>
@@ -360,7 +419,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                               disabled={!isEditable}
                               style={{ height: 40 }}
                               minimumValue={0}
-                              maximumValue={Math.max(30, exercise.prescribedRepsFirstSet)}
+                              maximumValue={Math.max(30, exercise.prescribedRepsFirstSet, previousReps, set.reps ?? 0)}
                               step={1}
                               value={set.reps ?? 0}
                               minimumTrackTintColor="#2563eb"
@@ -369,17 +428,13 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                               onValueChange={reps => updateSet(exercise.id, index, { reps })}
                             />
                           </View>
-                          <View style={{ width: 100 }}>
+                          <View style={{ width: 120 }}>
                             <Text>Weight (kg)</Text>
-                            <TextInput
-                              editable={isEditable}
-                              style={{ borderWidth: 1, borderColor: '#94a3b8', borderRadius: 6, padding: 10, backgroundColor: '#fff' }}
-                              keyboardType="decimal-pad"
-                              placeholder="—"
-                              value={set.weight}
-                              accessibilityLabel={`${exercise.name}, set ${index + 1} weight in kilograms`}
-                              onChangeText={weight => updateSet(exercise.id, index, { weight })}
-                            />
+                            <WeightPicker value={set.weight} weights={exerciseWeights[exercise.id]?.weights ?? []} increments={exerciseWeights[exercise.id]?.increments ?? []}
+                              onInteractionChange={setIsWeightInteracting}
+                              disabled={!isEditable} label={`${exercise.name}, set ${index + 1} weight in kilograms`}
+                              onChange={weight => updateSet(exercise.id, index, { weight, rememberWeight: false })}
+                              onManualEntry={weight => updateSet(exercise.id, index, { weight, rememberWeight: true })} />
                             <Pressable
                               accessibilityRole="button"
                               accessibilityLabel={`Complete ${exercise.name}, set ${index + 1}`}
@@ -404,9 +459,22 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                       </View>
                     );
                   })}
+                  {setDrafts[exercise.id].every(set => set.completed) && <Button title="Add set"
+                    accessibilityLabel={`Add set to ${exercise.name}`} disabled={isBusy || isFinished}
+                    onPress={() => setSetDrafts(current => {
+                      const sets = current[exercise.id];
+                      const previous = sets[sets.length - 1];
+                      const last = lastSetWeights.find(item => item.exerciseId === exercise.id && item.setPosition === sets.length);
+                      const weight = last ? String(last.weight) : previous.weight;
+                      const reps = lastSetReps.find(item => item.exerciseId === exercise.id && item.setPosition === sets.length
+                        && item.weight === Number(weight))?.reps ?? previous.reps;
+                      return { ...current, [exercise.id]: [...sets, {
+                        ...previous, weight, reps, completed: false,
+                      }] };
+                    })} />}
                 </View>
               )}
-            </View>
+            </Pressable>
             </Fragment>
           ))}
           <View style={{ marginTop: 24, marginBottom: 20 }}>
@@ -415,6 +483,16 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
         </>
       )}
     </ScrollView>
+    {options && <ExerciseOptionsModal key={`${options.exercise.id}-${options.mode}`}
+      name={options.exercise.name} mode={options.mode} setCount={setDrafts[options.exercise.id].length}
+      initial={annotations[options.exercise.id] ?? { comment: '', excludeAll: false, excludedPositions: [] }}
+      onClose={() => setOptions(null)}
+      onSkip={options.mode === 'tracking' && !setDrafts[options.exercise.id].some(set => set.completed)
+        ? () => { completeExercise(options.exercise.id); setOptions(null); } : undefined}
+      onSave={async annotation => {
+        await saveExerciseAnnotation(await initializeDatabase(), sessionId, options.exercise, annotation);
+        setAnnotations(current => ({ ...current, [options.exercise.id]: annotation }));
+      }} />}
     <PersonalRecordCelebration trigger={isFinished ? 0 : recordCount} />
     <Modal visible={isFinished} transparent animationType="fade" onRequestClose={closeSummary}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 }}>
@@ -427,9 +505,10 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
             {performedExercises.map(exercise => (
               <View key={exercise.id} style={{ gap: 4 }}>
                 <Text style={{ fontSize: 16, fontWeight: '600' }}>{exercise.name}</Text>
+                {!!annotations[exercise.id]?.comment && <Text>{annotations[exercise.id].comment}</Text>}
                 {setDrafts[exercise.id].map((set, index) => set.completed && (
                   <Text key={index}>
-                    Set {index + 1}: {set.reps} reps × {set.weight.trim().replace(',', '.')} kg
+                    Set {index + 1}: {set.reps} reps × {set.weight.trim().replace(',', '.')} kg{annotations[exercise.id]?.excludeAll || annotations[exercise.id]?.excludedPositions.includes(index) ? ' — Excluded from PRs and plots' : ''}
                   </Text>
                 ))}
               </View>

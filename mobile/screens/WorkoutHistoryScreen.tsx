@@ -100,11 +100,12 @@ export default function WorkoutHistoryScreen() {
                     <Text style={[styles.weight, styles.label]}>Weight (kg)</Text>
                     <Text style={[styles.reps, styles.label]}>Reps</Text>
                   </View>
-                  {workout.sets.map(set => (
+                  {workout.sets.map((set, index) => (
                     <View key={set.id} style={styles.row}>
                       <View style={styles.exercise}>
                         <Text>{set.exerciseName}</Text>
-                        <Text style={styles.setLabel}>Set {set.setPosition + 1}</Text>
+                        <Text style={styles.setLabel}>Set {set.setPosition + 1}{set.excludedFromTracking ? ' — Excluded from PRs and plots' : ''}</Text>
+                        {!!set.exerciseComment && (index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName) && <Text>{set.exerciseComment}</Text>}
                       </View>
                       <Text style={styles.weight}>{set.weight ?? '—'}</Text>
                       <Text style={styles.reps}>{set.reps}</Text>
@@ -112,6 +113,10 @@ export default function WorkoutHistoryScreen() {
                   ))}
                 </View>
               )}
+              {workout.exerciseNotes?.map((note, index) => <View key={index} style={{ marginTop: 8 }}>
+                <Text>{note.exerciseName}</Text>
+                <Text>{note.comment}</Text>
+              </View>)}
             </Pressable>
           ))}
         </>

@@ -8,11 +8,13 @@ import type { ExerciseProgressPoint } from '../database';
 import { DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
 import type { DateFormat } from '../dateFormat';
 import { sessionVolumes, setColor, topSets } from '../exerciseProgress';
+import WeightPicker from '../components/WeightPicker';
 import ExerciseProgressChart from '../components/ExerciseProgressChart';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Progress'>;
 
 export default function ProgressScreen({ route }: Props) {
+  const [isWeightInteracting, setIsWeightInteracting] = useState(false);
   const { exerciseId, exerciseName } = route.params;
   const [history, setHistory] = useState<ExerciseProgressPoint[]>([]);
   const [metric, setMetric] = useState<'reps' | 'volume'>('reps');
@@ -33,9 +35,7 @@ export default function ProgressScreen({ route }: Props) {
         if (cancelled) return;
         setHistory(rows);
         setDateFormat(format);
-        const hasAssistance = history.some(row => row.weight < 0);
-  const isVolume = metric === 'volume' && !hasAssistance;
-  const weights = rows.map(row => row.weight);
+        const weights = rows.map(row => row.weight);
         setWeight(current => current !== null && weights.includes(current) ? current : rows.length ? Math.max(...weights) : null);
       } catch (cause) {
         console.error('Loading exercise progress failed:', cause);
@@ -69,7 +69,7 @@ export default function ProgressScreen({ route }: Props) {
   }));
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView scrollEnabled={!isWeightInteracting} contentContainerStyle={styles.container}>
       <Text style={styles.heading}>{exerciseName}</Text>
       {loading ? <Text>Loading progress…</Text> : error ? <Text>{error}</Text> : history.length === 0 ? (
         <Text>No finished workouts with a recorded weight yet.</Text>
@@ -79,9 +79,14 @@ export default function ProgressScreen({ route }: Props) {
             onPress={() => setMetric(isVolume ? 'reps' : 'volume')} />
           {hasAssistance && <Text>Volume is unavailable for assisted exercises without body weight.</Text>}
           <Text>{isVolume ? 'Volume per workout (kg · reps)' : 'Reps at selected weight'}</Text>
-          {!isVolume && <View style={styles.weights}>
-            {weights.map(value => <Button key={value} title={`${value} kg`}
-              accessibilityLabel={`Select ${value} kg`} disabled={value === weight} onPress={() => setWeight(value)} />)}
+          {!isVolume && <View style={{ alignItems: 'center' }}>
+            <Text>Weight (kg)</Text>
+            <WeightPicker label="Plot weight in kilograms" value={String(weight)} weights={weights}
+              onInteractionChange={setIsWeightInteracting}
+              selectionOnly disabled={false} onChange={value => {
+                const selectedWeight = Number(value);
+                if (weights.includes(selectedWeight)) setWeight(selectedWeight);
+              }} />
           </View>}
           <Button title={topOnly ? 'Show all sets' : 'Show top sets only'} onPress={() => setTopOnly(current => !current)} />
           <Text>{isVolume

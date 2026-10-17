@@ -1,5 +1,43 @@
 # Project state
 
+Routine table headings now use Reps and kg without superscripts. Weight-entry
+fields use the regular keyboard so commas, decimal points, and negative signs
+are available. Routine day drafts retain raw weight input text while typing;
+validation and existing comma-to-point normalization handle saved numbers.
+
+The shared weight wheel uses 120-unit width, 48-unit rows, and tap-to-select
+adjacent values. ActiveSession and Progress pause their surrounding ScrollView
+while a wheel is touched, restoring scrolling on touch end or cancellation.
+
+Progress charts switch to year labels and stronger year boundaries for histories
+covering at least one calendar year. Day ticks and month labels are hidden at that
+scale; faint monthly guides remain. Short histories keep the existing date axis.
+
+## Legacy dataset preparation
+
+The original `~/gymdata` has been converted into a separate additional dataset,
+named Legacy: see [data/legacy/README.md](../data/legacy/README.md).
+`scripts/build_legacy.py` generates SQLite and portable JSON artifacts, retaining
+source text, approved exercise mappings, estimated-date provenance, and a review
+report. Be means Back extension; Lrm means Machine lateral raise, distinct from
+the single ignored `Lr m trying out` entry. Six focused Python conversion tests
+cover parsing, mappings, dates, source accounting, and SQLite integrity/rebuilds.
+Legacy format v2 stores trailing prose as comments and excludes source entries
+26–27 from tracking while retaining their four sets. Cp means Chest press;
+Pu ng h merges into Pu ng. Mr in the Japanese-gym period (late September 2024
+through March 2025) is Machine row (partial), distinct from Machine row elsewhere.
+Settings now offers Import Legacy. `mobile/legacyImport.ts` imports the compact
+generated `mobile/data/legacy.json` atomically: 278 finished workouts, 5,973 sets,
+matching case-insensitive exact library names and creating unmatched exercises.
+History is labeled Legacy; comments/exclusions are retained. Imported performance
+contributes to plots and future PR comparisons, but historical PR badges and
+routine prescriptions are untouched. app_settings/legacy_import_v1 prevents
+duplicates and stores source/date provenance. Dates use local noon placeholders.
+Lukas accepted the four estimated dates and requested removing all other flagged
+entries, including their sets. The converter now applies that deletion and stores
+removed source line numbers for provenance; the embedded original remains intact.
+Generating the artifacts alone does not change current app data; importing is explicit.
+
 GymLog is a learning project: a local-first mobile workout logger built with
 Expo, React Native, TypeScript, React Navigation, and SQLite (`expo-sqlite`).
 Development uses a Linux PC and Android phone/emulator. iPhone compatibility
@@ -27,6 +65,17 @@ is desired; it has not been verified. A web interface is deferred.
 - Select a day and start a workout, creating a persistent session row.
 - Resume a recent unfinished session (within six hours of its start) from workout selection; restore saved sets and workout order.
 - Expand exercise cards to edit reps and weight; sets are editable sequentially.
+  Once all current sets are saved, Add set appends another draft with the previous
+  set’s values. Complete exercise is disabled while its card is collapsed.
+- Weight pickers start from the latest saved weight at the same exercise/set
+  position, including added sets. Resuming preserves this session’s saved values.
+- Exercise weights are configured through start/increment rules, individual values, or an independent
+  copy from another exercise. Library → Weights edits existing exercises; the training
+  day editor offers configuration when creating exercises. Active workouts use a
+  reusable wheel picker; hold it for manual entry. A manually entered weight becomes a permanent custom
+  weight when its set is successfully logged.
+  There is no end-weight field: each rule runs until the next starting weight;
+  the last continues as you scroll. A moving window keeps generated lists small.
 - Save each completed set immediately. Failed saves leave the set unfinished.
 - A newly saved same-weight rep PR triggers a short fade/rise/scale animation reading
   "New personal record!". First baselines, ties, and idempotent retries do not celebrate.
@@ -123,8 +172,8 @@ tests are installed; `npm run check` checks types and enforced coverage floors.
 
 From `mobile/`, run `npm run check` and `npm run docs` (or `npm test` for tests only).
 TypeDoc generates `mobile/docs/api/index.html` from `database.ts` and `dateFormat.ts`; generated files
-are ignored by Git. The repository suite has 142 tests; the latest run reached
-99.66% line coverage and 92.67% branch coverage, with full measured database/date
+are ignored by Git. The repository suite has 176 tests; the latest run reached
+99.63% line coverage and 93.98% branch coverage, with full measured database/date
 coverage. HTML coverage is at `mobile/coverage/lcov-report/index.html`. No lint
 script is configured. Native Android interaction still needs emulator testing.
 
@@ -137,3 +186,55 @@ run (`useNewConnection: true` avoids Expo's cached native-handle reuse). Screens
 await the same schema setup; failed initialization clears the promise for retry.
 Navigation refocus reloads queries without reopening SQLite. This addresses the
 suspected native-handle lifecycle problem; verify Progress → Back after a full reload.
+
+Progress reuses WeightPicker in selection-only mode: sorted distinct recorded
+weights, initially the heaviest, with no empty entry or manual entry. Its maximum
+is the highest recorded weight. Volume mode hides it and returning to reps keeps
+the selection.
+
+Active exercise cards now offer Add comment and Exclude sets from tracking on
+long press, including completed cards. The tracking dialog selects individual
+positions or all current/future sets; Skip lives there before any completed set.
+Comments and exclusions persist immediately, restore on resume, and appear in
+history. Exclusions affect PR calculations/library records and plots, including
+volume; weight defaults and logged performance remain intact. Previously saved
+PR deltas and already-updated prescribed targets are not retroactively rewritten.
+Current preference: keep tests/checking lighter during UI iteration; let Lukas
+check the app instead of expanding coverage for every small change.
+
+Later active-workout sets default reps from the last performance at the same
+exercise, set position and weight; selecting a different weight refreshes that
+default from cached history. First-set prescribed targets and saved rows are kept.
+
+Settings → Workout targets selects Hypertrophy (+1 rep), the default, or Fixed
+targets. The setting is saved in app_settings as progression_mode. In fixed mode,
+PRs still record and celebrate but do not update prescribed reps. ActiveSession
+only updates its displayed target when the database returns prescribedReps.
+Last-performance wheel/slider defaults currently apply in both modes.
+
+Logged exercise names prefer the current library name via exercise_id; saved
+exercise_name is the fallback after library deletion. History cards, notes and
+resumed workouts use this rule. Progress groups by exercise ID and receives the
+current name from the library when opened, so renaming does not split history.
+
+Routine viewing now uses compact TrainingDayTable components (exercise, sets,
+first-set reps and kg). Hold a row to edit through PrescriptionEditor; saving
+updates that day/exercise only. RoutineScreen offers Make active, Copy, and Load
+existing training day with case-insensitive day-name search. The active routine
+is pinned above a divider; SessionScreen also puts it first. No active routine is
+chosen automatically. Copies reuse exercise IDs but create independent routine
+and day IDs when saved. The reusable-day list includes all currently stored days
+from active/inactive routines, labeled with source routine names.
+
+Sortables now handles hold-and-drag rearrangement. StartScreen uses Sortable.Grid with columns={2}
+to keep equal square tiles in exactly two columns; drop order is
+stored in app_settings/start_screen_order. Viewed training-day tables use
+Sortable.Grid: tap opens prescription editing, hold drags within that day, and
+SQLite positions save on drop. Draft day exercises also reorder via dedicated
+handles, with the order saved when the routine is saved. App and Android modal
+contents have GestureHandlerRootView wrappers; animated scroll refs allow auto
+scroll during dragging. Reanimated 4.5.1 / Worklets 0.10.1 match Expo SDK 57.
+
+Routine deletion is available inside the existing routine editor (View → Edit
+routine), with confirmation; it is no longer on overview rows. Successful deletion
+closes the editor.

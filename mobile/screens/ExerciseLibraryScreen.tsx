@@ -6,8 +6,11 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { deleteExercise, initializeDatabase, listExercisesWithRecords } from '../database';
 import type { ExerciseWithRecord } from '../database';
 
+import ExerciseWeightsModal from '../components/ExerciseWeightsModal';
+
 export default function ExerciseLibraryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [weightExercise, setWeightExercise] = useState<ExerciseWithRecord | null>(null);
   const [exercises, setExercises] = useState<ExerciseWithRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export default function ExerciseLibraryScreen() {
   }
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.heading}>Exercise library</Text>
       {isLoading ? <Text>Loading records…</Text> : error ? <Text>{error}</Text> : (
@@ -77,6 +81,7 @@ export default function ExerciseLibraryScreen() {
               onLongPress={() => navigation.navigate('Progress', { exerciseId: exercise.id, exerciseName: exercise.name })}>
               <View style={styles.cardHeader}>
                 <Text style={styles.name}>{exercise.name}</Text>
+                <Button title="Weights" accessibilityLabel={`Weights for ${exercise.name}`} onPress={() => setWeightExercise(exercise)} disabled={isDeleting} />
                 <Button title="X" accessibilityLabel={`Delete ${exercise.name}`} color="#b91c1c"
                   disabled={isDeleting} onPress={() => confirmDelete(exercise)} />
               </View>
@@ -90,6 +95,8 @@ export default function ExerciseLibraryScreen() {
         </>
       )}
     </ScrollView>
+    {weightExercise && <ExerciseWeightsModal key={weightExercise.id} exercise={weightExercise} exercises={exercises} onClose={() => setWeightExercise(null)} />}
+    </>
   );
 }
 

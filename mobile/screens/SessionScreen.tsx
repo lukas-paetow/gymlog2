@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, ScrollView, TextInput, Button, View, Alert, Modal } from 'react-native';
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { getResumableSession, createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
+import { getActiveRoutineId, getResumableSession, createLoggedSession, initializeDatabase, listRoutines, listTrainingDays } from '../database'
 import { Routine, TrainingDay, UnfinishedSession} from '../database'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
@@ -18,6 +18,7 @@ type RoutineWithDays = {
 export default function SessionScreen({ navigation }: Props) {
   
   const [routinesWithDays, setRoutinesWithDays] = useState<RoutineWithDays[]>([]); // the initial value is at the end
+  const [activeRoutineId, setActiveRoutineId] = useState<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<TrainingDay | null>(null);
 
 
@@ -32,12 +33,15 @@ export default function SessionScreen({ navigation }: Props) {
         const db = await initializeDatabase();
         const unfinished = await getResumableSession(db);
         const routines = await listRoutines(db);
+        const activeId = await getActiveRoutineId(db);
+        routines.sort((a, b) => Number(b.id === activeId) - Number(a.id === activeId));
         const contents = await Promise.all(
           routines.map(async routine => ({ routine, days: await listTrainingDays(db, routine.id) })) // this is where RoutineWithDays comes in
         );
 
         if (!cancelled) {
           setRoutinesWithDays(contents);
+          setActiveRoutineId(activeId);
           setResumableSession(unfinished);
           setSelectedDay(current => current && contents.some(entry => entry.days.some(day => day.id === current.id)) ? current : null);
         }
@@ -102,6 +106,7 @@ export default function SessionScreen({ navigation }: Props) {
       {routinesWithDays.map(({ routine, days}) => ( // object desctructuring with ({ })
         <View key={routine.id}> 
           <Text>{routine.name}</Text>
+          {routine.id === activeRoutineId && <Text>Active routine</Text>}
           {days.map(day => (
            <Button key={day.id} 
                    title={day.name}

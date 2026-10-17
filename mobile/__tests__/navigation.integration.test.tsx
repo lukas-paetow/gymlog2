@@ -12,10 +12,11 @@ jest.mock('@react-native-community/slider', () => {
   return (props: object) => React.createElement(require('react-native').View, props);
 });
 jest.mock('../database', () => ({
+  getExerciseWeightOptions: jest.fn(),
   listExercisesWithRecords: jest.fn(), listExerciseProgress: jest.fn(),
-  initializeDatabase: jest.fn(), listFinishedWorkouts: jest.fn(), getDateFormat: jest.fn(),
-  getResumableSession: jest.fn(), listRoutines: jest.fn(), listTrainingDays: jest.fn(),
-  createLoggedSession: jest.fn(), getLoggedSession: jest.fn(), listSavedSessionSets: jest.fn(),
+  initializeDatabase: jest.fn(), listFinishedWorkouts: jest.fn(), getProgressionMode: jest.fn(), setProgressionMode: jest.fn(), getDateFormat: jest.fn(),
+  getResumableSession: jest.fn(), getStartScreenOrder: jest.fn(), setStartScreenOrder: jest.fn(), reorderTrainingDayExercises: jest.fn(), getActiveRoutineId: jest.fn(), setActiveRoutine: jest.fn(), listReusableTrainingDays: jest.fn(), updateExercisePrescription: jest.fn(), listRoutines: jest.fn(), listTrainingDays: jest.fn(),
+  createLoggedSession: jest.fn(), getLoggedSession: jest.fn(), listExerciseAnnotations: jest.fn(), saveExerciseAnnotation: jest.fn(), listLastSetReps: jest.fn(), listLastSetWeights: jest.fn(), listSavedSessionSets: jest.fn(),
   listExercisesInTrainingDay: jest.fn(), finishLoggedSession: jest.fn(),
 }));
 const db = jest.mocked(database);
@@ -30,12 +31,26 @@ beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   db.initializeDatabase.mockResolvedValue({} as Awaited<ReturnType<typeof database.initializeDatabase>>);
   db.getDateFormat.mockResolvedValue('DD/MM/YYYY');
+  db.getProgressionMode.mockResolvedValue('hypertrophy');
+  db.setProgressionMode.mockResolvedValue();
+  db.getExerciseWeightOptions.mockResolvedValue({ weights: [], increments: [] });
   db.listFinishedWorkouts.mockResolvedValue([]);
   db.getResumableSession.mockResolvedValue(null);
+  db.getStartScreenOrder.mockResolvedValue([]);
+  db.setStartScreenOrder.mockResolvedValue();
+  db.reorderTrainingDayExercises.mockResolvedValue();
+  db.getActiveRoutineId.mockResolvedValue(null);
+  db.setActiveRoutine.mockResolvedValue();
+  db.listReusableTrainingDays.mockResolvedValue([]);
+  db.updateExercisePrescription.mockResolvedValue();
   db.listRoutines.mockResolvedValue([{ id: 1, name: 'Routine' }]);
   db.listTrainingDays.mockResolvedValue([{ id: 2, name: 'Gym day', position: 0, routineId: 1 }]);
   db.createLoggedSession.mockResolvedValue(42);
   db.getLoggedSession.mockResolvedValue({ trainingDayId: 2, trainingDayName: 'Selected gym day', finishTime: null });
+  db.listExerciseAnnotations.mockResolvedValue([]);
+  db.saveExerciseAnnotation.mockResolvedValue();
+  db.listLastSetReps.mockResolvedValue([]);
+  db.listLastSetWeights.mockResolvedValue([]);
   db.listSavedSessionSets.mockResolvedValue([]);
   db.listExercisesInTrainingDay.mockResolvedValue([]);
   db.finishLoggedSession.mockResolvedValue();
