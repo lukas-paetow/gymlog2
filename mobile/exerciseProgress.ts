@@ -1,4 +1,18 @@
-import type { ExerciseProgressPoint } from './database';
+import type { ExerciseHistorySet, ExerciseProgressPoint } from './database';
+
+/** Two calendar months of tracked, weighted history; clamp month-end dates. */
+export function recentExerciseHistory(rows: ExerciseHistorySet[], now: Date) {
+  const cutoff = new Date(now);
+  cutoff.setDate(1);
+  cutoff.setMonth(cutoff.getMonth() - 2);
+  const lastDay = new Date(cutoff.getFullYear(), cutoff.getMonth() + 1, 0).getDate();
+  cutoff.setDate(Math.min(now.getDate(), lastDay));
+  cutoff.setHours(0, 0, 0, 0);
+  return rows.filter((row): row is ExerciseHistorySet & { weight: number } => {
+    const timestamp = new Date(row.finishTime).getTime();
+    return !row.excluded && row.weight !== null && timestamp >= cutoff.getTime() && timestamp <= now.getTime();
+  }).sort((a, b) => new Date(a.finishTime).getTime() - new Date(b.finishTime).getTime() || a.sessionId - b.sessionId || a.setPosition - b.setPosition);
+}
 
 /** One top set per session: heaviest weight, then most reps, then earliest set. */
 export function topSets(history: ExerciseProgressPoint[]): ExerciseProgressPoint[] {

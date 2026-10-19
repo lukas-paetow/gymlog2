@@ -16,15 +16,15 @@ export default function TrainingDayTable({ name, exercises, onEdit, disabled, on
       onAccessibilityAction={() => { if (!disabled) onEdit(exercise); }}>
       <Text style={styles.exercise}>{exercise.name}</Text>
       <Text style={styles.number}>{exercise.prescribedSets}</Text>
-      <Text style={styles.number}>{exercise.prescribedRepsFirstSet}</Text>
       <Text style={styles.weight}>{exercise.prescribedWeightFirstSet}</Text>
+      <Text style={styles.number}>{exercise.prescribedRepsFirstSet}</Text>
     </Sortable.Touchable>
   ), [disabled, name, onEdit]);
   return <View style={styles.table}>
     <Text style={styles.title}>{name}</Text>
     <View style={[styles.row, styles.header]}>
       <Text style={styles.exercise}>Exercise</Text><Text style={styles.number}>Sets</Text>
-      <Text style={styles.number}>Reps</Text><Text style={styles.weight}>kg</Text>
+      <Text style={styles.weight}>kg</Text><Text style={styles.number}>Reps</Text>
     </View>
     <Sortable.Grid columns={1} data={exercises} renderItem={renderItem} keyExtractor={exercise => String(exercise.id)}
       scrollableRef={scrollableRef} dragActivationDelay={400} sortEnabled={!disabled} activeItemScale={1.02}

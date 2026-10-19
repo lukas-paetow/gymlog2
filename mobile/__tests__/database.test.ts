@@ -310,6 +310,101 @@ describe('logging, records, and history', () => {
   });
 });
 
+test('editing finished sets rebuilds chronological PRs without changing routine targets', async () => {
+  await database.initializeDatabase();
+  const { sessionId, day, exercise } = await plan();
+  const first = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+  const nextSession = await database.createLoggedSession(fixture.db, day.id);
+  const next = await database.saveCompletedSet(fixture.db, nextSession, exercise, 0, 0, 10, -20);
+  await database.finishLoggedSession(fixture.db, nextSession);
+  const targets = await database.listExercisesInTrainingDay(fixture.db, day.id);
+  await database.updateLoggedSet(fixture.db, sessionId, first.id, -20, 12);
+  const history = await database.listFinishedWorkouts(fixture.db);
+  expect(history.flatMap(w => w.sets).find(s => s.id === first.id)).toMatchObject({ reps: 12, weight: -20, repPrImprovement: null });
+  expect(history.flatMap(w => w.sets).find(s => s.id === next.id)).toMatchObject({ reps: 10, repPrImprovement: 0 });
+  expect(await database.listExercisesInTrainingDay(fixture.db, day.id)).toEqual(targets);
+  await database.updateLoggedSet(fixture.db, sessionId, first.id, -17.5, 12);
+  expect((await database.listFinishedWorkouts(fixture.db)).flatMap(w => w.sets).find(s => s.id === next.id)?.repPrImprovement).toBeNull();
+  const active = await database.createLoggedSession(fixture.db, day.id);
+  const activeSet = await database.saveCompletedSet(fixture.db, active, exercise, 0, 0, 8, -10);
+  await expect(database.updateLoggedSet(fixture.db, active, activeSet.id, -5, 9)).rejects.toThrow('Finished set not found');
+  await expect(database.updateLoggedSet(fixture.db, nextSession, first.id, -5, 9)).rejects.toThrow('Finished set not found');
+  await expect(database.updateLoggedSet(fixture.db, sessionId, first.id, NaN, 9)).rejects.toThrow('Invalid set');
+  await expect(database.updateLoggedSet(fixture.db, sessionId, first.id, -5, 0)).rejects.toThrow('Invalid set');
+});
+
+test('a failed PR rebuild rolls the historical set correction back', async () => {
+  await database.initializeDatabase();
+  const { sessionId, exercise } = await plan();
+  const set = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+  await database.finishLoggedSession(fixture.db, sessionId);
+  const original = fixture.adapter.runAsync.bind(fixture.adapter);
+  jest.spyOn(fixture.adapter, 'runAsync').mockImplementation(async (sql, ...parameters) => {
+    if (sql.startsWith('UPDATE logged_sets SET rep_pr_improvement')) throw new Error('disk failure');
+    return original(sql, ...parameters);
+  });
+  await expect(database.updateLoggedSet(fixture.db, sessionId, set.id, -15, 12)).rejects.toThrow('disk failure');
+  expect(fixture.connection.prepare('SELECT weight, reps FROM logged_sets WHERE id = ?').get(set.id)).toEqual({ weight: -20, reps: 8 });
+});
+
+test('finished logs can append and delete sets while keeping exclusions and PR markers consistent', async () => {
+  await database.initializeDatabase();
+  const { sessionId, exercise } = await plan();
+  const first = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
+  await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Note', excludeAll: false, excludedPositions: [2] });
+  await database.finishLoggedSession(fixture.db, sessionId);
+  const added = await database.addLoggedSet(fixture.db, sessionId, first.id, -20, 12);
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets.find(set => set.id === added))
+    .toMatchObject({ weight: -20, reps: 12, setPosition: 1, repPrImprovement: 4 });
+  await database.deleteLoggedSet(fixture.db, sessionId, first.id);
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets[0]).toMatchObject({ id: added, setPosition: 1, repPrImprovement: null });
+  const third = await database.addLoggedSet(fixture.db, sessionId, added, -20, 14);
+  await database.deleteLoggedSet(fixture.db, sessionId, third);
+  const replacement = await database.addLoggedSet(fixture.db, sessionId, added, -20, 15);
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets.find(set => set.id === replacement))
+    .toMatchObject({ setPosition: 2, repPrImprovement: 3 });
+  expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0].excludedPositions).toEqual([]);
+  await expect(database.addLoggedSet(fixture.db, sessionId, added, -20, 0)).rejects.toThrow('Invalid set');
+  await expect(database.deleteLoggedSet(fixture.db, sessionId + 100, added)).rejects.toThrow('Finished set not found');
+  await database.deleteLoggedSet(fixture.db, sessionId, added);
+  await database.deleteLoggedSet(fixture.db, sessionId, replacement);
+  expect(await database.listFinishedWorkouts(fixture.db)).toEqual([]);
+});
+
+test('rep defaults use per-position PRs rather than recent lower performances or excluded sets', async () => {
+  await database.initializeDatabase();
+  const { exercise, sessionId, day } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 14, -20);
+  const newer = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, newer, exercise, 0, 0, 8, -20);
+  await database.saveCompletedSet(fixture.db, newer, exercise, 0, 1, 7, -20);
+  const excluded = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, excluded, exercise, 0, 0, 99, -20);
+  await database.saveExerciseAnnotation(fixture.db, excluded, exercise, { comment: '', excludeAll: true, excludedPositions: [] });
+  const active = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, active, exercise, 0, 0, 100, -20);
+  const records = await database.listSetRepRecords(fixture.db, active);
+  expect(records).toEqual([
+    { exerciseId: exercise.id, setPosition: 0, weight: -20, reps: 14 },
+    { exerciseId: exercise.id, setPosition: 1, weight: -20, reps: 7 },
+  ]);
+});
+
+test('exercise history preserves excluded performance and comments while omitting the active session', async () => {
+  await database.initializeDatabase();
+  const { exercise, sessionId, day } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 12, -20);
+  await database.saveExerciseAnnotation(fixture.db, sessionId, exercise,
+    { comment: 'Shoulder sore', excludeAll: false, excludedPositions: [0] });
+  await database.finishLoggedSession(fixture.db, sessionId);
+  const active = await database.createLoggedSession(fixture.db, day.id);
+  await database.saveCompletedSet(fixture.db, active, exercise, 0, 0, 15, -15);
+  const history = await database.listExerciseHistory(fixture.db, exercise.id, active);
+  expect(history).toHaveLength(1);
+  expect(history[0]).toMatchObject({ sessionId, setPosition: 0, reps: 12, weight: -20, comment: 'Shoulder sore', excluded: 1 });
+  expect(await database.listExerciseHistory(fixture.db, exercise.id + 100, active)).toEqual([]);
+});
+
 describe('settings and demo fixtures', () => {
   beforeEach(async () => { await database.initializeDatabase(); });
   test('date settings default, validate, upsert, and survive closing/reopening', async () => {

@@ -1,5 +1,5 @@
 import { Alert, Button, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -16,10 +16,23 @@ export default function ExerciseLibraryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const deletingRef = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffset = useRef(0);
+  const restoreOffset = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isLoading || restoreOffset.current === null) return;
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: restoreOffset.current ?? 0, animated: false });
+      restoreOffset.current = null;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isLoading]);
 
   // reloads also upon returning to this screen as opposed to useEffect
   useFocusEffect(useCallback(() => { // usecallback makes function reference stable
     let cancelled = false;
+    restoreOffset.current = scrollOffset.current;
 
     async function loadRecords() {
       setIsLoading(true);
@@ -67,10 +80,12 @@ export default function ExerciseLibraryScreen() {
 
   return (
     <>
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView testID="exercise-library-scroll" ref={scrollRef} contentContainerStyle={styles.container} scrollEventThrottle={16}
+      onScroll={event => { if (restoreOffset.current === null) scrollOffset.current = event.nativeEvent.contentOffset.y; }}>
       <Text style={styles.heading}>Exercise library</Text>
-      {isLoading ? <Text>Loading records…</Text> : error ? <Text>{error}</Text> : (
+      {isLoading && exercises.length === 0 ? <Text>Loading records…</Text> : (
         <>
+          {error && <Text>{error}</Text>}
           {exercises.length === 0 && <Text>No exercises yet. Add one when creating a routine.</Text>}
           {exercises.map(exercise => (
             <Pressable key={exercise.id} style={styles.card} accessibilityRole="button"

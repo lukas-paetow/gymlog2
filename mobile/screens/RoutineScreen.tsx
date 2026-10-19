@@ -1,7 +1,7 @@
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useAnimatedRef } from 'react-native-reanimated';
 import Sortable from 'react-native-sortables';
-import { Alert, Button, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Button, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { SQLiteDatabase } from 'expo-sqlite';
@@ -396,7 +396,12 @@ export default function RoutineScreen() {
       <Button title="Add routine" onPress={newRoutineMenu} disabled={busy} />
       <Modal visible={isEditorOpen} onRequestClose={closeEditor}>
         <GestureHandlerRootView style={{ flex: 1 }}>
-        <Animated.ScrollView ref={editorScrollRef} contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Animated.ScrollView ref={editorScrollRef} style={{ flex: 1 }} contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled"
+          onFocus={event => {
+            const target = event.nativeEvent.target;
+            setTimeout(() => editorScrollRef.current?.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(target, 24, true), 250);
+          }}>
           {editorStep === 'routine' ? (
             <>
               <Text style={styles.heading}>{editingRoutineId === null ? 'New routine' : 'Edit routine'}</Text>
@@ -490,17 +495,23 @@ export default function RoutineScreen() {
           )}
           <Button title={editorStep === 'day' ? 'Cancel day' : editingRoutineId === null ? 'Cancel routine' : 'Cancel changes'} onPress={closeEditor} disabled={isSaving} />
         </Animated.ScrollView>
+        </KeyboardAvoidingView>
         </GestureHandlerRootView>
       </Modal>
       <Modal visible={viewedRoutine !== null} onRequestClose={() => { if (!isSaving) { if (prescription) setPrescription(null); else setViewedRoutine(null); } }}>
         <GestureHandlerRootView style={{ flex: 1 }}>
-        <Animated.ScrollView ref={viewScrollRef} contentContainerStyle={styles.editor}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Animated.ScrollView ref={viewScrollRef} style={{ flex: 1 }} contentContainerStyle={styles.editor} keyboardShouldPersistTaps="handled"
+          onFocus={event => {
+            const target = event.nativeEvent.target;
+            setTimeout(() => viewScrollRef.current?.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(target, 24, true), 250);
+          }}>
           <Text style={styles.heading}>{viewedRoutine?.name}</Text>
           {isLoadingView && <Text>Loading training days…</Text>}
           {viewError && <Text>{viewError}</Text>}
           {prescription ? <PrescriptionEditor key={`${prescription.dayId}-${prescription.exercise.id}`} exercise={prescription.exercise}
             onSave={savePrescription} onCancel={() => setPrescription(null)} /> : <>
-            {!isLoadingView && !viewError && <Text>¹ First-set prescription. Tap to edit; hold and drag to reorder.</Text>}
+            {!isLoadingView && !viewError && <Text>First-set prescription. Tap to edit; hold and drag to reorder.</Text>}
             {!isLoadingView && !viewError && viewedDays.map(({ day, exercises: entries }) => (
               <TrainingDayTable key={day.id} name={day.name} exercises={entries} disabled={busy} scrollableRef={viewScrollRef}
                 onReorder={exercises => { void reorderViewedDay(day.id, exercises); }}
@@ -511,6 +522,7 @@ export default function RoutineScreen() {
           </>}
           <Button title="Close" disabled={isSaving} onPress={() => { setPrescription(null); setViewedRoutine(null); }} />
         </Animated.ScrollView>
+        </KeyboardAvoidingView>
         </GestureHandlerRootView>
       </Modal>
     </View>

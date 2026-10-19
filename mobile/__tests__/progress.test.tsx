@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import ProgressScreen from '../screens/ProgressScreen';
 import ExerciseProgressChart from '../components/ExerciseProgressChart';
+import ExerciseHistoryModal from '../components/ExerciseHistoryModal';
 import * as database from '../database';
 
 jest.mock('@react-navigation/native', () => ({
@@ -10,7 +11,7 @@ jest.mock('@quidone/react-native-wheel-picker', () => {
   const React = require('react');
   return (props: object) => React.createElement(require('react-native').View, { ...props, testID: 'weight-wheel' });
 });
-jest.mock('../database', () => ({ initializeDatabase: jest.fn(), listExerciseProgress: jest.fn(), getDateFormat: jest.fn() }));
+jest.mock('../database', () => ({ initializeDatabase: jest.fn(), listExerciseProgress: jest.fn(), listExerciseHistory: jest.fn(), getDateFormat: jest.fn() }));
 // Keep our chart adapter real; replace the external native drawing boundary.
 jest.mock('react-native-gifted-charts', () => ({
   LineChart: (props: object) => require('react').createElement(require('react-native').View, { ...props, testID: 'line-chart' }),
@@ -25,6 +26,24 @@ beforeEach(() => {
   db.listExerciseProgress.mockResolvedValue([]);
 });
 afterEach(() => jest.restoreAllMocks());
+
+test('active history plots recent sets at a chosen weight while preserving older log cards', async () => {
+  db.listExerciseHistory.mockResolvedValue([
+    { sessionId: 3, finishTime: new Date(Date.now() - 86400000).toISOString(), setPosition: 0, weight: 9, reps: 10, comment: '', excluded: 0 },
+    { sessionId: 2, finishTime: new Date(Date.now() - 2 * 86400000).toISOString(), setPosition: 1, weight: 10, reps: 12, comment: '', excluded: 0 },
+    { sessionId: 1, finishTime: '2000-01-01T12:00:00Z', setPosition: 0, weight: 9, reps: 99, comment: '', excluded: 0 },
+  ]);
+  await render(<ExerciseHistoryModal exerciseId={7} name="Dips" sessionId={4} onClose={jest.fn()} />);
+  await screen.findByText('Reps at 9 kg');
+  expect(screen.getByText('All-time PR at 9 kg: 99 reps')).toBeVisible();
+  await fireEvent(screen.getByTestId('progress-chart'), 'layout', { nativeEvent: { layout: { width: 400 } } });
+  expect(screen.getByTestId('line-chart').props.data.map((point: { value: number }) => point.value)).toEqual([10]);
+  expect(screen.getByText('Set 1: 9 kg × 99 reps')).toBeVisible();
+  expect(screen.getByTestId('weight-wheel').props.data.map((item: { value: string }) => item.value)).toEqual(['9', '10']);
+  await fireEvent(screen.getByTestId('weight-wheel'), 'valueChanged', { item: { value: '10' } });
+  expect(screen.getByText('All-time PR at 10 kg: 12 reps')).toBeVisible();
+  expect(screen.getByTestId('line-chart').props.data.map((point: { value: number }) => point.value)).toEqual([12]);
+});
 
 test('selects heaviest weight initially and switches to assistance, keeping best-rep dates', async () => {
   db.listExerciseProgress.mockResolvedValue([

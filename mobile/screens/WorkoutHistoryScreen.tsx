@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { deleteFinishedWorkout, getDateFormat, initializeDatabase, listFinishedWorkouts } from '../database';
+import { Alert, Button, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { addLoggedSet, deleteLoggedSet, deleteFinishedWorkout, getDateFormat, initializeDatabase, listFinishedWorkouts, updateLoggedSet } from '../database';
 import type { FinishedWorkout } from '../database';
 import { DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
 import WorkoutCalendar from '../components/WorkoutCalendar';
 import type { DateFormat } from '../dateFormat';
+import WorkoutSetTable from '../components/WorkoutSetTable';
+import EditLoggedSetModal from '../components/EditLoggedSetModal';
 
 export default function WorkoutHistoryScreen() {
   const deletingRef = useRef(false);
@@ -15,6 +17,16 @@ export default function WorkoutHistoryScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT);
+  const [editingWorkoutId, setEditingWorkoutId] = useState<number | null>(null);
+  const [editingSet, setEditingSet] = useState<{ sessionId: number; set: FinishedWorkout['sets'][number]; adding?: boolean } | null>(null);
+  const [addingWorkout, setAddingWorkout] = useState<FinishedWorkout | null>(null);
+
+  async function refreshHistory() {
+    const rows = await listFinishedWorkouts(await initializeDatabase());
+    setWorkouts(rows);
+    setEditingWorkoutId(current => rows.some(workout => workout.id === current) ? current : null);
+    setSelectedWorkoutId(current => rows.some(workout => workout.id === current) ? current : null);
+  }
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
@@ -60,9 +72,10 @@ export default function WorkoutHistoryScreen() {
 
   function confirmDelete(workout: FinishedWorkout) {
     if (deletingRef.current) return;
-    Alert.alert('Delete workout?',
+    Alert.alert('Workout options',
       `${workout.routineName} · ${workout.trainingDayName}\n${formatWorkoutDate(workout.finishTime, dateFormat)}\nDelete this workout and all its logged sets?\n\nSaved PR flags in other workouts stay unchanged. Your current PRs may change because they are calculated from the remaining history.`, [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Edit', onPress: () => { setEditingWorkoutId(workout.id); setSelectedWorkoutId(workout.id); } },
         { text: 'Delete', style: 'destructive', onPress: () => removeWorkout(workout.id) },
       ]);
   }
@@ -73,6 +86,7 @@ export default function WorkoutHistoryScreen() {
     : workouts;
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.heading}>Workout history</Text>
       {isLoading ? <Text>Loading workouts…</Text> : error ? <Text>{error}</Text> : (
@@ -93,25 +107,20 @@ export default function WorkoutHistoryScreen() {
                 </Text>
                 <Text style={styles.date}>{formatWorkoutDate(workout.finishTime, dateFormat)}</Text>
               </View>
+              {editingWorkoutId === workout.id && <View style={{ gap: 8 }}>
+                <Text>Double-tap a row to edit its weight and reps.</Text>
+                <Button title="Add set" onPress={() => setAddingWorkout(workout)} />
+                <Button title="Done editing workout" onPress={() => setEditingWorkoutId(null)} />
+              </View>}
               {workout.sets.length === 0 ? <Text>No sets completed.</Text> : (
-                <View>
-                  <View style={[styles.row, styles.tableHeader]}>
-                    <Text style={[styles.exercise, styles.label]}>Exercise</Text>
-                    <Text style={[styles.weight, styles.label]}>Weight (kg)</Text>
-                    <Text style={[styles.reps, styles.label]}>Reps</Text>
-                  </View>
-                  {workout.sets.map((set, index) => (
-                    <View key={set.id} style={styles.row}>
-                      <View style={styles.exercise}>
-                        <Text>{set.exerciseName}</Text>
-                        <Text style={styles.setLabel}>Set {set.setPosition + 1}{set.excludedFromTracking ? ' — Excluded from PRs and plots' : ''}</Text>
-                        {!!set.exerciseComment && (index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName) && <Text>{set.exerciseComment}</Text>}
-                      </View>
-                      <Text style={styles.weight}>{set.weight ?? '—'}</Text>
-                      <Text style={styles.reps}>{set.reps}</Text>
-                    </View>
-                  ))}
-                </View>
+                <WorkoutSetTable showExercise disabled={isDeleting}
+                  rows={workout.sets.map((set, index) => ({ id: set.id, exerciseName: set.exerciseName, weight: set.weight, reps: set.reps,
+                    isPR: (set.repPrImprovement ?? 0) > 0, excluded: set.excludedFromTracking,
+                    comment: index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName ? set.exerciseComment : undefined }))}
+                  onHold={() => confirmDelete(workout)} onEdit={row => {
+                    const set = workout.sets.find(set => set.id === row.id);
+                    if (set) setEditingSet({ sessionId: workout.id, set });
+                  }} />
               )}
               {workout.exerciseNotes?.map((note, index) => <View key={index} style={{ marginTop: 8 }}>
                 <Text>{note.exerciseName}</Text>
@@ -122,6 +131,33 @@ export default function WorkoutHistoryScreen() {
         </>
       )}
     </ScrollView>
+    <Modal visible={addingWorkout !== null} transparent animationType="fade" onRequestClose={() => setAddingWorkout(null)}>
+      {addingWorkout && <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.45)' }}>
+        <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, maxHeight: '80%', gap: 16 }}>
+          <Text style={{ fontSize: 22 }}>Add a set to which exercise?</Text>
+          <ScrollView contentContainerStyle={{ gap: 12 }}>
+            {[...new Map(addingWorkout.sets.map(set => [set.loggedExerciseId ?? set.exerciseName, set])).values()].map(set =>
+              <Button key={set.id} title={set.exerciseName} onPress={() => {
+                setEditingSet({ sessionId: addingWorkout.id, set, adding: true });
+                setAddingWorkout(null);
+              }} />)}
+          </ScrollView>
+          <Button title="Cancel adding set" onPress={() => setAddingWorkout(null)} />
+        </View>
+      </View>}
+    </Modal>
+    {editingSet && <EditLoggedSetModal key={`${editingSet.set.id}-${editingSet.adding ?? false}`} set={editingSet.set} adding={editingSet.adding}
+      onClose={() => setEditingSet(null)} onDelete={editingSet.adding ? undefined : async () => {
+        await deleteLoggedSet(await initializeDatabase(), editingSet.sessionId, editingSet.set.id);
+        await refreshHistory();
+      }}
+      onSave={async (weight, reps) => {
+        const db = await initializeDatabase();
+        if (editingSet.adding) await addLoggedSet(db, editingSet.sessionId, editingSet.set.id, weight, reps);
+        else await updateLoggedSet(db, editingSet.sessionId, editingSet.set.id, weight, reps);
+        await refreshHistory();
+      }} />}
+    </>
   );
 }
 
@@ -134,11 +170,4 @@ const styles = StyleSheet.create({
   name: { fontSize: 20, flex: 1 },
   day: { fontSize: 14, color: '#4b5563' },
   date: { color: '#4b5563', textAlign: 'right', flexShrink: 0 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderColor: '#e5e7eb' },
-  tableHeader: { backgroundColor: '#f3f4f6' },
-  label: { fontWeight: '600' },
-  exercise: { flex: 2 },
-  weight: { flex: 1, textAlign: 'right' },
-  reps: { width: 40, textAlign: 'right' },
-  setLabel: { fontSize: 12, color: '#6b7280' },
 });

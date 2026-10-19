@@ -1,5 +1,84 @@
 # Project state
 
+Library → Progress → Back preserves the library scroll offset. Focus refreshes
+keep existing cards mounted rather than briefly replacing them with a loading
+message, and restore the offset after rendering the refreshed records.
+WorkoutSetTable is shared by finished summaries and history: compact kg × reps
+rows, no set-number prefixes, and green PR badges from saved rep_pr_improvement.
+Post-workout summary tables left-align weight × reps, with PR badges and a
+rightmost Set column displaying the set number only.
+Active drafts retain their PR flag on save/resume. Routine tables order kg before
+reps too. Routine creation/editing and prescription forms use KeyboardAvoidingView
+plus focused-input scrolling to keep fields above the keyboard.
+History card/calendar long press offers Edit/Delete/Cancel. Edit highlights the
+workout with row-edit instructions; double-tapping a row (also a direct shortcut)
+opens EditLoggedSetModal with kg then reps, supporting decimal commas and negative
+weights. updateLoggedSet validates ownership and finished status, updates the set,
+and recalculates that exercise's chronological same-weight PR markers in one
+transaction. Excluded/null-weight sets do not establish PRs; prescriptions remain
+unchanged. Deleted-library exercise history groups by its saved name. History
+reloads after saving, so corrected values and badges refresh together.
+Edit mode also offers Add set with a chooser of already-logged exercises, followed
+by kg/reps entry. The row editor offers confirmed Delete set. addLoggedSet and
+deleteLoggedSet share transactional chronological PR rebuilding with corrections.
+New sets append after the exercise's maximum recorded position; deletion keeps
+surviving positions stable and removes that position's exclusion. A finished
+workout with no remaining sets automatically stops appearing in history.
+
+The active-workout exercise-history modal includes ExerciseProgressChart above
+the full history cards. Its plot filters to the preceding two calendar months,
+excludes tracking-excluded and null-weight sets, and starts at the latest logged
+weight. The shared vertical WeightPicker switches among recorded recent weights,
+with no manual entry or inferred higher weights; touching it pauses modal scrolling.
+Colors show set number.
+The history popup header shows the all-time rep PR at the wheel's selected
+weight (tracking exclusions omitted), even when that record predates the plot's
+two-month window. If there is no recent plotted weight, use the last tracked weight.
+Older workouts remain in the history list. The existing history query supplies
+the plot without an additional database read.
+
+RepSlider's visible range is now eight reps (nine integer ticks). Tick marks are
+overlaid directly across the native slider track with pointer events disabled;
+small labels below the track mark multiples of five. This replaces StepMarker,
+whose layout placed marks above the track. Arrow range controls are retained.
+
+RepSlider now uses the slider library's StepMarker to draw a small vertical tick
+at each integer rep. Left/right arrow buttons shift the range and selected value
+by five reps, with accessible labels. ActiveSession offers Add unplanned exercise
+above Finish: AddWorkoutExercise loads the library, filters names as typed, hides
+already-added exercises and provides tappable suggestions. Selection appends an
+expanded one-set draft with last weight/PR defaults and weight options. No routine
+changes or logged sets are written until actual completion. Unperformed additions
+remain transient; performed ones resume via their normal saved snapshots.
+Sparse inferred weights now use 1 kg for singleton integer observations (9 →
+10,11,…), 0.5 kg for half-kg observations, and 1.25 kg only on a supported 1.25-kg
+grid. Large gaps between only two observations fall back to that smaller step.
+Singleton remembered weight profiles get inference too; explicit increment rules
+and multi-weight lists retain precedence.
+
+Active-workout defaults now retain the last-used weight per set position and
+use the tracked rep PR at that exact weight/position (first set +1 in hypertrophy
+mode, no +1 in fixed mode). `listSetRepRecords` excludes the current session and
+tracking-excluded sets. Saved sets are never overwritten. If no weight profile
+is configured, inferWeightOptions preserves logged weights and adds five higher
+choices using the commonest positive gap (smallest on ties, 2.5 kg for one weight).
+These are inferred suggestions, not persisted equipment rules. Explicit profiles
+take precedence. RepSlider shows a stable ten-rep window and −5/+5 buttons to
+recenter at other counts. Selecting the dash in WeightPicker retains its anchor,
+so a lone custom/default weight does not disappear.
+
+WeightPicker now opens manual entry on two short taps (within 300ms); drags and
+holds do not count as taps. Accessibility activation remains available. Generated
+weight lists are memoized, selection updates are deferred while touched, and a
+changed list remounts the native wheel to reset its index-based animations. This
+addresses disappearing items when moving between generated weight windows.
+Active-session long press now opens a custom four-action menu (Android alerts
+only allow three buttons), adding View exercise history alongside comment and
+tracking actions. ExerciseHistoryModal loads finished sets for that exercise,
+excluding the current workout, with dates, comments and tracking exclusions.
+It is read-only and leaves active drafts intact. Lukas chose last-used weights
+with per-position rep PR defaults.
+
 Routine table headings now use Reps and kg without superscripts. Weight-entry
 fields use the regular keyboard so commas, decimal points, and negative signs
 are available. Routine day drafts retain raw weight input text while typing;

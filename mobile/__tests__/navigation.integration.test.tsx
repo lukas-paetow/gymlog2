@@ -16,7 +16,7 @@ jest.mock('../database', () => ({
   listExercisesWithRecords: jest.fn(), listExerciseProgress: jest.fn(),
   initializeDatabase: jest.fn(), listFinishedWorkouts: jest.fn(), getProgressionMode: jest.fn(), setProgressionMode: jest.fn(), getDateFormat: jest.fn(),
   getResumableSession: jest.fn(), getStartScreenOrder: jest.fn(), setStartScreenOrder: jest.fn(), reorderTrainingDayExercises: jest.fn(), getActiveRoutineId: jest.fn(), setActiveRoutine: jest.fn(), listReusableTrainingDays: jest.fn(), updateExercisePrescription: jest.fn(), listRoutines: jest.fn(), listTrainingDays: jest.fn(),
-  createLoggedSession: jest.fn(), getLoggedSession: jest.fn(), listExerciseAnnotations: jest.fn(), saveExerciseAnnotation: jest.fn(), listLastSetReps: jest.fn(), listLastSetWeights: jest.fn(), listSavedSessionSets: jest.fn(),
+  createLoggedSession: jest.fn(), getLoggedSession: jest.fn(), listExerciseAnnotations: jest.fn(), saveExerciseAnnotation: jest.fn(), listSetRepRecords: jest.fn(), listLastSetWeights: jest.fn(), listSavedSessionSets: jest.fn(),
   listExercisesInTrainingDay: jest.fn(), finishLoggedSession: jest.fn(),
 }));
 const db = jest.mocked(database);
@@ -49,7 +49,7 @@ beforeEach(() => {
   db.getLoggedSession.mockResolvedValue({ trainingDayId: 2, trainingDayName: 'Selected gym day', finishTime: null });
   db.listExerciseAnnotations.mockResolvedValue([]);
   db.saveExerciseAnnotation.mockResolvedValue();
-  db.listLastSetReps.mockResolvedValue([]);
+  db.listSetRepRecords.mockResolvedValue([]);
   db.listLastSetWeights.mockResolvedValue([]);
   db.listSavedSessionSets.mockResolvedValue([]);
   db.listExercisesInTrainingDay.mockResolvedValue([]);
@@ -92,15 +92,23 @@ test('Start → ActiveSession → Finish → Done uses real routing and session 
 
 
 test('Library → Progress → Back reloads exercise records on returning', async () => {
-  db.listExercisesWithRecords.mockResolvedValue([{ id: 7, name: 'Squat', heaviestWeight: 80, repsAtHeaviestWeight: 8 }]);
+  const rows = [{ id: 7, name: 'Squat', heaviestWeight: 80, repsAtHeaviestWeight: 8 }];
+  let finishRefresh!: (value: typeof rows) => void;
+  const refresh = new Promise<typeof rows>(resolve => { finishRefresh = resolve; });
+  db.listExercisesWithRecords.mockResolvedValueOnce(rows).mockReturnValueOnce(refresh);
   db.listExerciseProgress.mockResolvedValue([]);
   await render(<App />);
   await fireEvent.press(screen.getByRole('button', { name: 'Exercise library' }));
+  await screen.findByRole('button', { name: 'View progress for Squat' });
+  await fireEvent.scroll(screen.getByTestId('exercise-library-scroll'), { nativeEvent: { contentOffset: { y: 600 } } });
   await fireEvent(await screen.findByRole('button', { name: 'View progress for Squat' }), 'longPress');
   expect(await screen.findByText('No finished workouts with a recorded weight yet.')).toBeVisible();
   const listener = backEvents.mock.calls.filter(([event]) => event === 'hardwareBackPress').at(-1)?.[1];
   await act(async () => { expect(listener()).toBe(true); });
   await waitFor(() => expect(db.listExercisesWithRecords).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button', { name: 'View progress for Squat' })).toBeVisible();
+  expect(screen.queryByText('Loading records…')).toBeNull();
+  await act(async () => finishRefresh(rows));
   expect(await screen.findByRole('button', { name: 'View progress for Squat' })).toBeVisible();
   expect(screen.queryByText('Could not load exercise records.')).toBeNull();
 });

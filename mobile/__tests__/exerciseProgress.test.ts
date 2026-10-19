@@ -1,8 +1,21 @@
-import { sessionVolumes, setColor, topSets } from '../exerciseProgress';
+import { recentExerciseHistory, sessionVolumes, setColor, topSets } from '../exerciseProgress';
+import type { ExerciseHistorySet } from '../database';
 import type { ExerciseProgressPoint } from '../database';
 
 const set = (id: number, sessionId: number, setPosition: number, weight: number, reps: number): ExerciseProgressPoint =>
   ({ id, sessionId, setPosition, weight, reps, finishTime: '2026-10-01T12:00:00Z' });
+
+test('recent history plots only two calendar months of weighted tracked sets', () => {
+  const row = (sessionId: number, date: string, extra: Partial<ExerciseHistorySet> = {}): ExerciseHistorySet =>
+    ({ sessionId, finishTime: date, setPosition: 0, weight: -10, reps: 8, comment: '', excluded: 0, ...extra });
+  const rows = [row(1, '2026-08-18T12:00:00'), row(2, '2026-08-19T00:00:00'),
+    row(3, '2026-10-18T12:00:00'), row(4, '2026-10-18T12:00:00', { excluded: 1 }),
+    row(5, '2026-10-18T12:00:00', { weight: null }), row(6, '2026-10-20T12:00:00')];
+  expect(recentExerciseHistory(rows, new Date('2026-10-19T12:00:00')).map(row => row.sessionId)).toEqual([2, 3]);
+  expect(rows).toHaveLength(6); // Full history list is retained.
+  expect(recentExerciseHistory([row(7, '2026-06-30T12:00:00'), row(8, '2026-06-29T12:00:00')],
+    new Date('2026-08-31T12:00:00')).map(row => row.sessionId)).toEqual([7]);
+});
 
 test('top sets use heaviest weight, reps for ties, and earliest set as final tie breaker', () => {
   const rows = [

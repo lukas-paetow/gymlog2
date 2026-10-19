@@ -33,9 +33,9 @@ jest.mock('../components/WeightPicker', () => {
     React.createElement(require('react-native').TextInput, { value, onChangeText: onChange, editable: !disabled, accessibilityLabel: label, availableWeights: weights });
 });
 jest.mock('../database', () => {
-  const names = ['initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'getExerciseWeightOptions', 'setExerciseWeights', 'deleteFinishedWorkout', 'listFinishedWorkouts',
+  const names = ['initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'getExerciseWeightOptions', 'setExerciseWeights', 'deleteFinishedWorkout', 'updateLoggedSet', 'addLoggedSet', 'deleteLoggedSet', 'listFinishedWorkouts',
     'getProgressionMode', 'setProgressionMode', 'getDateFormat', 'setDateFormat', 'seedDemoHistory', 'getResumableSession', 'getStartScreenOrder', 'setStartScreenOrder', 'reorderTrainingDayExercises', 'getActiveRoutineId', 'setActiveRoutine', 'listReusableTrainingDays', 'updateExercisePrescription', 'listRoutines', 'listTrainingDays',
-    'createLoggedSession', 'getLoggedSession', 'listExercisesInTrainingDay', 'listExerciseAnnotations', 'saveExerciseAnnotation', 'listLastSetReps', 'listLastSetWeights', 'listSavedSessionSets', 'saveCompletedSet',
+    'createLoggedSession', 'getLoggedSession', 'listExercisesInTrainingDay', 'listExerciseAnnotations', 'listExerciseHistory', 'saveExerciseAnnotation', 'listSetRepRecords', 'listLastSetWeights', 'listSavedSessionSets', 'saveCompletedSet',
     'finishLoggedSession', 'listExercises', 'insertRoutine', 'updateRoutine', 'insertExercise', 'deleteRoutine'];
   return Object.fromEntries(names.map(name => [name, jest.fn()]));
 });
@@ -95,7 +95,7 @@ beforeEach(() => {
   db.getLoggedSession.mockResolvedValue({ trainingDayId: 2, trainingDayName: 'Day', finishTime: null });
   db.listExerciseAnnotations.mockResolvedValue([]);
   db.saveExerciseAnnotation.mockResolvedValue();
-  db.listLastSetReps.mockResolvedValue([]);
+  db.listSetRepRecords.mockResolvedValue([]);
   db.listLastSetWeights.mockResolvedValue([]);
   db.listSavedSessionSets.mockResolvedValue([]);
   db.createLoggedSession.mockResolvedValue(4);
@@ -246,7 +246,7 @@ describe('active workout', () => {
     expect(screen.getByLabelText('Dips, set 2 weight in kilograms')).not.toBeDisabled();
     expect(screen.queryByText('New personal record!')).toBeNull();
     await fireEvent.press(screen.getByText('Complete exercise'));
-    expect(screen.getByText('Set 1: 8 reps × -20 kg')).toBeTruthy();
+    expect(screen.getByText('-20 kg × 8 reps')).toBeTruthy();
   });
   test('failed save keeps first set editable', async () => {
     db.saveCompletedSet.mockRejectedValueOnce(new Error('save failed'));
@@ -261,7 +261,7 @@ describe('active workout', () => {
   test('long-press reveals Skip and does not write unperformed data', async () => {
     await renderActive();
     await fireEvent(screen.getByText('Dips'), 'longPress');
-    await chooseAlert('Exclude sets from tracking');
+    await fireEvent.press(screen.getByText('Exclude sets from tracking'));
     await fireEvent.press(screen.getByText('Skip exercise'));
     expect(screen.queryByText('Dips')).toBeNull();
     expect(screen.getByText('All exercises have been skipped.')).toBeTruthy();
@@ -297,7 +297,7 @@ describe('active workout', () => {
     db.listSavedSessionSets.mockResolvedValue([saved, { ...saved, loggedExerciseId: 2, exerciseId: null, name: 'Deleted', position: 5, prescribedSets: 1 }]);
     await renderActive();
     await screen.findByText('Snapshot dips');
-    expect(screen.getByText('Set 1: 8 reps × -20 kg')).toBeTruthy();
+    expect(screen.getByText('-20 kg × 8 reps')).toBeTruthy();
     await fireEvent.press(screen.getByText('Snapshot dips'));
     expect(screen.getByLabelText('Snapshot dips, set 1 weight in kilograms')).toBeDisabled();
     expect(screen.getByLabelText('Snapshot dips, set 2 weight in kilograms')).not.toBeDisabled();
@@ -691,7 +691,7 @@ describe('deleting past workouts', () => {
     await screen.findByTestId('workout-card-1');
     await fireEvent.press(screen.getByRole('button', { name: 'View Upper on 23/11/2026' }));
     await fireEvent(screen.getByTestId('workout-card-1'), 'longPress');
-    expect(alert).toHaveBeenLastCalledWith('Delete workout?', expect.stringContaining('Upper'), expect.any(Array));
+    expect(alert).toHaveBeenLastCalledWith('Workout options', expect.stringContaining('Upper'), expect.any(Array));
     await chooseAlert('Cancel');
     expect(db.deleteFinishedWorkout).not.toHaveBeenCalled();
     await fireEvent(screen.getByTestId('workout-card-1'), 'longPress');
@@ -830,7 +830,7 @@ test('resuming keeps saved weights while prefilling unfinished positions from hi
 test('exercise comment saves before logging, displays on the card and summary, and can be edited after completion', async () => {
   await renderActive();
   await fireEvent(screen.getByText('Dips'), 'longPress');
-  await chooseAlert('Add comment');
+  await fireEvent.press(screen.getByText('Add comment'));
   await fireEvent.changeText(screen.getByLabelText('Exercise comment'), 'Unexpected shoulder pain');
   await fireEvent.press(screen.getByText('Save comment'));
   expect(db.saveExerciseAnnotation).toHaveBeenCalledWith(expect.anything(), 4, exercise, { comment: 'Unexpected shoulder pain', excludeAll: false, excludedPositions: [] });
@@ -842,7 +842,7 @@ test('exercise comment saves before logging, displays on the card and summary, a
   await fireEvent.press(screen.getByText('Dips'));
   expect(screen.queryByLabelText('Dips, set 2 weight in kilograms')).toBeNull();
   await fireEvent(screen.getByText('Dips'), 'longPress');
-  await chooseAlert('Add comment');
+  await fireEvent.press(screen.getByText('Add comment'));
   expect(screen.getByLabelText('Exercise comment').props.value).toBe('Unexpected shoulder pain');
   await fireEvent.press(screen.getByText('Cancel exercise details'));
   await fireEvent.press(screen.getByText('Finish workout'));
@@ -853,7 +853,7 @@ test('exercise comment saves before logging, displays on the card and summary, a
 test('selective and all-set tracking choices save and show on completed cards', async () => {
   await renderActive();
   await fireEvent(screen.getByText('Dips'), 'longPress');
-  await chooseAlert('Exclude sets from tracking');
+  await fireEvent.press(screen.getByText('Exclude sets from tracking'));
   await fireEvent(screen.getByLabelText('Exclude set 1'), 'valueChange', true);
   await fireEvent.press(screen.getByText('Save tracking choices'));
   expect(db.saveExerciseAnnotation).toHaveBeenLastCalledWith(expect.anything(), 4, exercise, { comment: '', excludeAll: false, excludedPositions: [0] });
@@ -861,16 +861,16 @@ test('selective and all-set tracking choices save and show on completed cards', 
   expect(screen.getByText('Set 1 — Excluded from PRs and plots')).toBeVisible();
   await fireEvent.press(screen.getByLabelText('Complete Dips, set 1'));
   await fireEvent(screen.getByText('Dips'), 'longPress');
-  await chooseAlert('Exclude sets from tracking');
+  await fireEvent.press(screen.getByText('Exclude sets from tracking'));
   expect(screen.queryByText('Skip exercise')).toBeNull();
   await fireEvent(screen.getByLabelText('Exclude all sets'), 'valueChange', true);
   await fireEvent.press(screen.getByText('Save tracking choices'));
   expect(screen.getByText('All sets excluded from PRs and plots')).toBeVisible();
   await fireEvent.press(screen.getByLabelText('Complete Dips'));
-  expect(screen.getByText('Set 1: 8 reps × -20 kg — Excluded from PRs and plots')).toBeVisible();
+  expect(screen.getByText('-20 kg × 8 reps — Excluded from PRs and plots')).toBeVisible();
   await fireEvent.press(screen.getByText('Finish workout'));
   await chooseAlert('Finish');
-  expect(screen.getAllByText('Set 1: 8 reps × -20 kg — Excluded from PRs and plots').length).toBeGreaterThan(0);
+  expect(screen.getByText('Excluded from PRs and plots')).toBeVisible();
 });
 
 test('annotations restore for exercises without saved sets, including removed plan exercises', async () => {
@@ -899,15 +899,15 @@ test('history displays exercise comments and excluded sets', async () => {
   expect(screen.getAllByText('Sore shoulder')).toHaveLength(1);
   expect(screen.getByText('Sore elbow')).toBeVisible();
   expect(screen.getByText('Stopped due to pain')).toBeVisible();
-  expect(screen.getByText('Set 1 — Excluded from PRs and plots')).toBeVisible();
+  expect(screen.getByText('Excluded from PRs and plots')).toBeVisible();
 });
 
 
-test('last rep defaults follow weight and set position while remaining adjustable', async () => {
+test('PR rep defaults follow the last weight and set position with a zoomed adjustable slider', async () => {
   db.listLastSetWeights.mockResolvedValue([
     { exerciseId: 7, setPosition: 0, weight: -20 }, { exerciseId: 7, setPosition: 1, weight: -15 }, { exerciseId: 7, setPosition: 2, weight: 0 },
   ]);
-  db.listLastSetReps.mockResolvedValue([
+  db.listSetRepRecords.mockResolvedValue([
     { exerciseId: 7, setPosition: 0, weight: -20, reps: 99 },
     { exerciseId: 7, setPosition: 1, weight: -15, reps: 6 },
     { exerciseId: 7, setPosition: 1, weight: -10, reps: 4 },
@@ -915,8 +915,17 @@ test('last rep defaults follow weight and set position while remaining adjustabl
   ]);
   await renderActive();
   await fireEvent.press(screen.getByText('Dips'));
-  expect(screen.getByLabelText('Dips, set 1 reps').props.value).toBe(8);
+  expect(screen.getByLabelText('Dips, set 1 reps').props.value).toBe(100);
   expect(screen.getByLabelText('Dips, set 2 reps').props.value).toBe(6);
+  expect(screen.getByLabelText('Dips, set 1 reps').props.minimumValue).toBe(96);
+  expect(screen.getByLabelText('Dips, set 1 reps').props.maximumValue).toBe(104);
+  expect(screen.getByTestId('rep-tick-label-100')).toHaveTextContent('100');
+  await fireEvent(screen.getByLabelText('Dips, set 1 reps'), 'valueChange', 103);
+  expect(screen.getByLabelText('Dips, set 1 reps').props.minimumValue).toBe(96);
+  await fireEvent.press(screen.getByLabelText('Dips, set 1 reps: five more'));
+  expect(screen.getByLabelText('Dips, set 1 reps').props.value).toBe(108);
+  expect(screen.getByLabelText('Dips, set 1 reps').props.minimumValue).toBe(104);
+  expect(screen.getByLabelText('Dips, set 1 weight in kilograms').props.availableWeights).toEqual([-20, -15, -10, 0, 5, 10, 15, 20, 25]);
   await fireEvent.press(screen.getByLabelText('Complete Dips, set 1'));
   await fireEvent.changeText(screen.getByLabelText('Dips, set 2 weight in kilograms'), '-10');
   expect(screen.getByLabelText('Dips, set 2 reps').props.value).toBe(4);
@@ -964,7 +973,9 @@ test('routine management copies routines into drafts and searches reusable train
     { id: 3, name: 'Upper day', position: 1, routineId: 1, routineName: 'Old plan' },
   ]);
   await render(<RoutineScreen />);
-  await fireEvent.press(await screen.findByLabelText('Copy Routine'));
+  await fireEvent.press(await screen.findByLabelText('View Routine'));
+  await screen.findByText('First-set prescription. Tap to edit; hold and drag to reorder.');
+  await fireEvent.press(screen.getByText('Copy routine'));
   expect(screen.getByPlaceholderText('Routine name').props.value).toBe('Routine (copy)');
   expect(screen.getByText('1. Day (1 exercises)')).toBeVisible();
   await fireEvent.press(screen.getByText('Load existing training day'));
@@ -1004,4 +1015,110 @@ test('imports Legacy from Settings and reports its result', async () => {
   await fireEvent.press(screen.getByText('Import Legacy'));
   await waitFor(() => expect(importLegacy).toHaveBeenCalledWith(expect.anything()));
   expect(alert).toHaveBeenCalledWith('Legacy imported', expect.stringContaining('278 workouts and 5973 sets'));
+});
+
+test('opens past exercise history from the active menu and returns to the same workout', async () => {
+  db.listExerciseHistory.mockResolvedValue([{ sessionId: 3, finishTime: '2026-10-10T12:00:00.000Z',
+    setPosition: 1, weight: -10, reps: 12, comment: 'Shoulder sore', excluded: 1 }]);
+  await renderActive();
+  await fireEvent.press(screen.getByText('Dips'));
+  await fireEvent(screen.getByText('Dips'), 'longPress');
+  await fireEvent.press(screen.getByText('View exercise history'));
+  expect(await screen.findByText('Shoulder sore')).toBeVisible();
+  expect(screen.getByText('Set 2: -10 kg × 12 reps · Excluded from tracking')).toBeVisible();
+  expect(db.listExerciseHistory).toHaveBeenCalledWith(expect.anything(), 7, 4);
+  await fireEvent.press(screen.getByText('Close history'));
+  expect(screen.getByLabelText('Complete Dips, set 1')).toBeVisible();
+  expect(db.saveCompletedSet).not.toHaveBeenCalled();
+});
+
+test('searches and adds an unplanned library exercise without changing the routine or logging sets', async () => {
+  db.listExercises.mockResolvedValue([{ id: 7, name: 'Dips' }, { id: 8, name: 'Dumbbell row' }, { id: 9, name: 'Leg curl' }]);
+  db.listLastSetWeights.mockResolvedValue([{ exerciseId: 8, setPosition: 0, weight: 9 }]);
+  db.listSetRepRecords.mockResolvedValue([{ exerciseId: 8, setPosition: 0, weight: 9, reps: 12 }]);
+  db.getExerciseWeightOptions.mockResolvedValue({ weights: [9], increments: [] });
+  await renderActive();
+  await fireEvent.press(screen.getByText('Add unplanned exercise'));
+  const search = await screen.findByLabelText('Search exercises for this workout');
+  expect(screen.queryByLabelText('Add Dips to workout')).toBeNull();
+  await fireEvent.changeText(search, 'row');
+  expect(screen.queryByLabelText('Add Leg curl to workout')).toBeNull();
+  await fireEvent.press(screen.getByLabelText('Add Dumbbell row to workout'));
+  const weight = await screen.findByLabelText('Dumbbell row, set 1 weight in kilograms');
+  expect(weight.props.value).toBe('9');
+  expect(weight.props.availableWeights).toEqual([9, 10, 11, 12, 13, 14]);
+  expect(screen.getByLabelText('Dumbbell row, set 1 reps').props.value).toBe(13);
+  expect(screen.getByLabelText('Dumbbell row, set 1 reps').props.maximumValue
+    - screen.getByLabelText('Dumbbell row, set 1 reps').props.minimumValue).toBe(8);
+  expect(screen.getByLabelText('Dumbbell row, set 1 reps: five more')).toHaveTextContent('›');
+  expect(db.saveCompletedSet).not.toHaveBeenCalled();
+  expect(db.updateRoutine).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByLabelText('Complete Dumbbell row, set 1'));
+  expect(db.saveCompletedSet).toHaveBeenCalledWith(expect.anything(), 4,
+    expect.objectContaining({ id: 8 }), expect.any(Number), 0, 13, 9, false);
+});
+
+test('history offers Edit and double-tap corrections accept decimal commas', async () => {
+  const workout: database.FinishedWorkout = { id: 1, routineId: null, trainingDayNumber: null,
+    routineName: 'Legacy', trainingDayName: 'Workout', finishTime: '2026-10-10T12:00:00Z',
+    sets: [{ id: 11, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 8 }] };
+  const updated = { ...workout, sets: [{ ...workout.sets[0], weight: -12.5, reps: 9 }] };
+  db.listFinishedWorkouts.mockResolvedValueOnce([workout]).mockResolvedValue([updated]);
+  db.updateLoggedSet.mockResolvedValue();
+  await render(<WorkoutHistoryScreen />);
+  await fireEvent(await screen.findByTestId('workout-card-1'), 'longPress');
+  await chooseAlert('Edit');
+  expect(screen.getByText('Double-tap a row to edit its weight and reps.')).toBeVisible();
+  const row = screen.getByLabelText('Edit Dips: -20 kg × 8 reps');
+  await fireEvent.press(row);
+  expect(screen.queryByText('Edit logged set')).toBeNull();
+  await fireEvent.press(row);
+  await fireEvent.changeText(screen.getByLabelText('Logged weight'), '-12,5');
+  await fireEvent.changeText(screen.getByLabelText('Logged reps'), '9');
+  await fireEvent.press(screen.getByText('Save logged set'));
+  expect(db.updateLoggedSet).toHaveBeenCalledWith(expect.anything(), 1, 11, -12.5, 9);
+  expect(await screen.findByLabelText('Edit Dips: -12.5 kg × 9 reps')).toBeVisible();
+  expect(screen.queryByText('Edit logged set')).toBeNull();
+});
+
+test('finished summary uses weight-first tables and marks performed PRs', async () => {
+  db.saveCompletedSet.mockResolvedValue({ id: 10, isPersonalRecord: true });
+  await renderActive();
+  await fireEvent.press(screen.getByText('Dips'));
+  await fireEvent.press(screen.getByLabelText('Complete Dips, set 1'));
+  await fireEvent.press(screen.getByText('Finish workout'));
+  await chooseAlert('Finish');
+  expect(screen.getByText('Workout finished')).toBeVisible();
+  expect(screen.getByText('-20')).toBeVisible();
+  expect(screen.getAllByText('PR')).toHaveLength(2); // Column label and performed-set badge.
+  expect(screen.getByText('Set')).toBeVisible();
+  expect(screen.getByText('1')).toBeVisible();
+  expect(screen.queryByText('Set 1: 8 reps × -20 kg')).toBeNull();
+});
+
+test('log edit mode adds sets and the row editor confirms single-set deletion', async () => {
+  const workout: database.FinishedWorkout = { id: 1, routineId: null, trainingDayNumber: null,
+    routineName: 'Legacy', trainingDayName: 'Workout', finishTime: '2026-10-10T12:00:00Z',
+    sets: [{ id: 11, loggedExerciseId: 30, exerciseName: 'Dips', setPosition: 0, weight: -20, reps: 8 }] };
+  const added = { ...workout.sets[0], id: 12, setPosition: 1, weight: -12.5, reps: 9 };
+  db.listFinishedWorkouts.mockResolvedValueOnce([workout]).mockResolvedValueOnce([{ ...workout, sets: [...workout.sets, added] }]).mockResolvedValue([workout]);
+  db.addLoggedSet.mockResolvedValue(12);
+  db.deleteLoggedSet.mockResolvedValue();
+  await render(<WorkoutHistoryScreen />);
+  await fireEvent(await screen.findByTestId('workout-card-1'), 'longPress');
+  await chooseAlert('Edit');
+  await fireEvent.press(screen.getByText('Add set'));
+  await fireEvent.press(screen.getByRole('button', { name: 'Dips' }));
+  await fireEvent.changeText(screen.getByLabelText('Logged weight'), '-12,5');
+  await fireEvent.changeText(screen.getByLabelText('Logged reps'), '9');
+  await fireEvent.press(screen.getByRole('button', { name: 'Add logged set' }));
+  expect(db.addLoggedSet).toHaveBeenCalledWith(expect.anything(), 1, 11, -12.5, 9);
+  const row = await screen.findByLabelText('Edit Dips: -12.5 kg × 9 reps');
+  await fireEvent.press(row);
+  await fireEvent.press(row);
+  await fireEvent.press(screen.getByText('Delete logged set'));
+  expect(db.deleteLoggedSet).not.toHaveBeenCalled();
+  await chooseAlert('Delete set');
+  expect(db.deleteLoggedSet).toHaveBeenCalledWith(expect.anything(), 1, 12);
+  expect(screen.queryByLabelText('Edit Dips: -12.5 kg × 9 reps')).toBeNull();
 });
