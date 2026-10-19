@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Alert, Button, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Button, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { addLoggedSet, deleteLoggedSet, deleteFinishedWorkout, getDateFormat, initializeDatabase, listFinishedWorkouts, updateLoggedSet } from '../database';
 import type { FinishedWorkout } from '../database';
 import { DEFAULT_DATE_FORMAT, formatWorkoutDate } from '../dateFormat';
@@ -87,7 +87,15 @@ export default function WorkoutHistoryScreen() {
 
   return (
     <>
-    <ScrollView contentContainerStyle={styles.container}>
+    <FlatList
+      style={{ flex: 1 }}
+      contentContainerStyle={styles.container}
+      data={isLoading || error ? [] : displayedWorkouts}
+      keyExtractor={workout => String(workout.id)}
+      initialNumToRender={4}
+      maxToRenderPerBatch={4}
+      windowSize={5}
+      ListHeaderComponent={<>
       <Text style={styles.heading}>Workout history</Text>
       {isLoading ? <Text>Loading workouts…</Text> : error ? <Text>{error}</Text> : (
         <>
@@ -95,42 +103,43 @@ export default function WorkoutHistoryScreen() {
           {workouts.length > 0 && <WorkoutCalendar workouts={workouts} dateFormat={dateFormat}
             selectedWorkoutId={selectedWorkoutId} onSelectWorkout={setSelectedWorkoutId}
             onLongPressWorkout={confirmDelete} />}
-          {displayedWorkouts.map(workout => (
-            <Pressable key={workout.id} testID={`workout-card-${workout.id}`} accessible={false}
-              disabled={isDeleting} onLongPress={() => confirmDelete(workout)}
-              style={[styles.card, workout.id === selectedWorkoutId && styles.selectedCard]}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.name} accessibilityActions={[{ name: 'delete', label: 'Delete workout' }]}
-                  onAccessibilityAction={() => confirmDelete(workout)}>
-                  {workout.routineName}
-                  <Text style={styles.day}> · {workout.trainingDayName}</Text>
-                </Text>
-                <Text style={styles.date}>{formatWorkoutDate(workout.finishTime, dateFormat)}</Text>
-              </View>
-              {editingWorkoutId === workout.id && <View style={{ gap: 8 }}>
-                <Text>Double-tap a row to edit its weight and reps.</Text>
-                <Button title="Add set" onPress={() => setAddingWorkout(workout)} />
-                <Button title="Done editing workout" onPress={() => setEditingWorkoutId(null)} />
-              </View>}
-              {workout.sets.length === 0 ? <Text>No sets completed.</Text> : (
-                <WorkoutSetTable showExercise disabled={isDeleting}
-                  rows={workout.sets.map((set, index) => ({ id: set.id, exerciseName: set.exerciseName, weight: set.weight, reps: set.reps,
-                    isPR: (set.repPrImprovement ?? 0) > 0, excluded: set.excludedFromTracking,
-                    comment: index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName ? set.exerciseComment : undefined }))}
-                  onHold={() => confirmDelete(workout)} onEdit={row => {
-                    const set = workout.sets.find(set => set.id === row.id);
-                    if (set) setEditingSet({ sessionId: workout.id, set });
-                  }} />
-              )}
-              {workout.exerciseNotes?.map((note, index) => <View key={index} style={{ marginTop: 8 }}>
-                <Text>{note.exerciseName}</Text>
-                <Text>{note.comment}</Text>
-              </View>)}
-            </Pressable>
-          ))}
         </>
       )}
-    </ScrollView>
+      </>}
+      renderItem={({ item: workout }) => (
+        <Pressable key={workout.id} testID={`workout-card-${workout.id}`} accessible={false}
+          disabled={isDeleting} onLongPress={() => confirmDelete(workout)}
+          style={[styles.card, workout.id === selectedWorkoutId && styles.selectedCard]}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.name} accessibilityActions={[{ name: 'delete', label: 'Delete workout' }]}
+              onAccessibilityAction={() => confirmDelete(workout)}>
+              {workout.routineName}
+              <Text style={styles.day}> · {workout.trainingDayName}</Text>
+            </Text>
+            <Text style={styles.date}>{formatWorkoutDate(workout.finishTime, dateFormat)}</Text>
+          </View>
+          {editingWorkoutId === workout.id && <View style={{ gap: 8 }}>
+            <Text>Double-tap a row to edit its weight and reps.</Text>
+            <Button title="Add set" onPress={() => setAddingWorkout(workout)} />
+            <Button title="Done editing workout" onPress={() => setEditingWorkoutId(null)} />
+          </View>}
+          {workout.sets.length === 0 ? <Text>No sets completed.</Text> : (
+            <WorkoutSetTable showExercise disabled={isDeleting}
+              rows={workout.sets.map((set, index) => ({ id: set.id, exerciseName: set.exerciseName, weight: set.weight, reps: set.reps,
+                isPR: (set.repPrImprovement ?? 0) > 0, excluded: set.excludedFromTracking,
+                comment: index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName ? set.exerciseComment : undefined }))}
+              onHold={() => confirmDelete(workout)} onEdit={row => {
+                const set = workout.sets.find(set => set.id === row.id);
+                if (set) setEditingSet({ sessionId: workout.id, set });
+              }} />
+          )}
+          {workout.exerciseNotes?.map((note, index) => <View key={index} style={{ marginTop: 8 }}>
+            <Text>{note.exerciseName}</Text>
+            <Text>{note.comment}</Text>
+          </View>)}
+        </Pressable>
+      )}
+    />
     <Modal visible={addingWorkout !== null} transparent animationType="fade" onRequestClose={() => setAddingWorkout(null)}>
       {addingWorkout && <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.45)' }}>
         <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, maxHeight: '80%', gap: 16 }}>
