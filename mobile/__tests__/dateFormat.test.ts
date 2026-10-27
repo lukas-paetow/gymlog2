@@ -7,7 +7,7 @@ test('accepts exactly the supported formats and defaults to day/month/year', () 
 });
 
 test.each([
-  ['DD/MM/YYYY', '23/11/2026'], ['MM/DD/YYYY', '11/23/2026'], ['YYYY-MM-DD', '2026-11-23'],
+  ['DD/MM/YYYY', '23/11/2026'], ['MM/DD/YYYY', '11/23/2026'],
 ] as const)('formats %s without time', (format, expected) => {
   expect(formatWorkoutDate('2026-11-23T12:00:00.000Z', format)).toBe(expected);
 });

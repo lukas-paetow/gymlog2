@@ -42,16 +42,16 @@ test('shows saved day names, multiple sessions per date, and a routine selector'
 });
 
 test('month controls cross year boundaries and preserve deleted-day history', async () => {
-  await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} dateFormat="YYYY-MM-DD" workouts={[
+  await render(<WorkoutCalendar onSelectWorkout={onSelectWorkout} dateFormat="DD/MM/YYYY" workouts={[
     workout(1, { routineId: null, trainingDayNumber: null }),
   ]} />);
-  expect(screen.getByLabelText('2026-12-10, Upper')).toBeVisible();
+  expect(screen.getByLabelText('10/12/2026, Upper')).toBeVisible();
   expect(screen.getByText('Upper')).toBeVisible();
   await fireEvent.press(screen.getByRole('button', { name: 'Next month' }));
-  expect(screen.getByLabelText('2027-01-01')).toBeVisible();
-  expect(screen.queryByLabelText('2026-12-10, Upper')).toBeNull();
+  expect(screen.getByLabelText('01/01/2027')).toBeVisible();
+  expect(screen.queryByLabelText('10/12/2026, Upper')).toBeNull();
   await fireEvent.press(screen.getByRole('button', { name: 'Previous month' }));
-  expect(screen.getByLabelText('2026-12-10, Upper')).toBeVisible();
+  expect(screen.getByLabelText('10/12/2026, Upper')).toBeVisible();
 });
 
 test('falls back to a remaining routine if the selected routine disappears on reload', async () => {

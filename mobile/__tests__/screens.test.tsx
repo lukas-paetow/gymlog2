@@ -178,10 +178,10 @@ describe('settings', () => {
   test('selects and persists a format, and can seed demo history', async () => {
     await render(<SettingsScreen />);
     await screen.findByText('● DD/MM/YYYY');
-    await fireEvent.press(screen.getByText('○ YYYY-MM-DD'));
-    await screen.findByText('● YYYY-MM-DD');
-    expect(db.setDateFormat).toHaveBeenCalledWith(expect.anything(), 'YYYY-MM-DD');
-    await fireEvent.press(screen.getByText('● YYYY-MM-DD'));
+    await fireEvent.press(screen.getByText('○ MM/DD/YYYY'));
+    await screen.findByText('● MM/DD/YYYY');
+    expect(db.setDateFormat).toHaveBeenCalledWith(expect.anything(), 'MM/DD/YYYY');
+    await fireEvent.press(screen.getByText('● MM/DD/YYYY'));
     expect(db.setDateFormat).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByText('Add demo history'));
     expect(alert).toHaveBeenLastCalledWith('Demo history added', expect.any(String));

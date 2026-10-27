@@ -118,7 +118,7 @@ describe('initialization and current baseline', () => {
     await database.initializeDatabase();
     const { exercise, sessionId } = await plan();
     await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 8, -20);
-    await database.setDateFormat(fixture.db, 'YYYY-MM-DD');
+    await database.setDateFormat(fixture.db, 'MM/DD/YYYY');
     const tables = ['routines', 'exercises', 'training_days', 'day_exercises',
       'logged_sessions', 'logged_exercises', 'logged_sets', 'app_settings'];
     const snapshot = () => Object.fromEntries(tables.map(table => [
