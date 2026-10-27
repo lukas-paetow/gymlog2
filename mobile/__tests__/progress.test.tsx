@@ -36,6 +36,9 @@ test('active history plots recent sets at a chosen weight while preserving older
   await render(<ExerciseHistoryModal exerciseId={7} name="Dips" sessionId={4} onClose={jest.fn()} />);
   await screen.findByText('Reps at 9 kg');
   expect(screen.getByText('All-time PR at 9 kg: 99 reps')).toBeVisible();
+  expect(screen.getByText('All-time best sets')).toBeVisible();
+  expect(screen.getByText('9 kg × 99 reps')).toBeVisible();
+  expect(screen.getByText('10 kg × 12 reps')).toBeVisible();
   await fireEvent(screen.getByTestId('progress-chart'), 'layout', { nativeEvent: { layout: { width: 400 } } });
   expect(screen.getByTestId('line-chart').props.data.map((point: { value: number }) => point.value)).toEqual([10]);
   expect(screen.getByText('Set 1: 9 kg × 99 reps')).toBeVisible();

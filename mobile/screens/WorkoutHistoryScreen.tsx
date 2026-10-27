@@ -126,7 +126,7 @@ export default function WorkoutHistoryScreen() {
           {workout.sets.length === 0 ? <Text>No sets completed.</Text> : (
             <WorkoutSetTable showExercise disabled={isDeleting}
               rows={workout.sets.map((set, index) => ({ id: set.id, exerciseName: set.exerciseName, weight: set.weight, reps: set.reps,
-                isPR: (set.repPrImprovement ?? 0) > 0, excluded: set.excludedFromTracking,
+                isPR: set.recordKind === 'pr', isSubmaximalPR: set.recordKind === 'submaximal', excluded: set.excludedFromTracking,
                 comment: index === 0 || workout.sets[index - 1].exerciseName !== set.exerciseName ? set.exerciseComment : undefined }))}
               onHold={() => confirmDelete(workout)} onEdit={row => {
                 const set = workout.sets.find(set => set.id === row.id);

@@ -80,7 +80,7 @@ describe('initialization and current baseline', () => {
     expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).toEqual([]);
     await database.initializeDatabase();
     expect(fixture.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(row => row.name)).toEqual([
-      'app_settings', 'day_exercises', 'exercise_weight_increments', 'exercise_weights', 'exercises', 'logged_exercise_annotations', 'logged_exercises',
+      'app_settings', 'day_exercises', 'exercise_notes', 'exercise_weight_increments', 'exercise_weights', 'exercises', 'logged_exercise_annotations', 'logged_exercises',
       'logged_sessions', 'logged_set_exclusions', 'logged_sets', 'routines', 'training_days',
     ]);
     expect(count('routines')).toBe(0);
@@ -220,7 +220,7 @@ describe('logging, records, and history', () => {
     for (const [position, reps, weight] of [[0, 8, -20], [1, 10, -20], [2, 10, -20], [3, 5, 0]]) {
       results.push(await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, position, reps, weight));
     }
-    expect(results.map(result => result.isPersonalRecord)).toEqual([false, true, false, false]);
+    expect(results.map(result => result.isPersonalRecord)).toEqual([false, true, false, true]);
     expect(await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 10, -20)).toEqual({ id: results[1].id, isPersonalRecord: false });
     expect(fixture.connection.prepare('SELECT rep_pr_improvement FROM logged_sets ORDER BY id').all().map(row => row.rep_pr_improvement)).toEqual([null, 2, 0, null]);
     const unused = await database.insertExercise(fixture.db, 'Unused');
@@ -772,9 +772,10 @@ describe('exercise annotations and tracking exclusions', () => {
     expect((await database.listLastSetWeights(fixture.db, -1)).find(set => set.setPosition === 1)?.weight).toBe(25);
     const next = await database.createLoggedSession(fixture.db, day.id);
     const baseline = await database.saveCompletedSet(fixture.db, next, exercise, 0, 0, 10, 25);
-    expect(baseline.isPersonalRecord).toBe(false);
+    expect(baseline.isPersonalRecord).toBe(true);
     const record = await database.saveCompletedSet(fixture.db, next, exercise, 0, 1, 9, 20);
-    expect(record.isPersonalRecord).toBe(true);
+    expect(record.isPersonalRecord).toBe(false);
+    expect(record.isSubmaximalRecord).toBe(true);
   });
   test('all sets applies to future added sets and can be reversed before finishing; annotation rows cascade on workout deletion', async () => {
     await database.initializeDatabase();
@@ -906,4 +907,52 @@ test('sortable orders persist without changing prescriptions and reject stale ex
   expect(entries[1].prescribedRepsFirstSet).toBe(8);
   await expect(database.reorderTrainingDayExercises(fixture.db, day.id, [second, second])).rejects.toThrow();
   expect((await database.listExercisesInTrainingDay(fixture.db, day.id)).map(entry => entry.id)).toEqual([second, exercise.id]);
+});
+
+
+test('weight takes priority over rep records, including negative assistance, and survives reload/edit', async () => {
+  await database.initializeDatabase();
+  const { exercise, sessionId } = await plan();
+  await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 0, 10, -20);
+  const heavier = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 1, 5, -10);
+  expect(heavier.isPersonalRecord).toBe(true);
+  const lighter = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 2, 12, -20);
+  expect(lighter).toMatchObject({ isPersonalRecord: false, isSubmaximalRecord: true });
+  const equalWeight = await database.saveCompletedSet(fixture.db, sessionId, exercise, 0, 3, 6, -10);
+  expect(equalWeight.isPersonalRecord).toBe(true);
+  expect((await database.listSavedSessionSets(fixture.db, sessionId)).map(set => set.recordKind))
+    .toEqual([null, 'pr', 'submaximal', 'pr']);
+  await database.finishLoggedSession(fixture.db, sessionId);
+  await database.updateLoggedSet(fixture.db, sessionId, lighter.id, -20, 13);
+  expect((await database.listFinishedWorkouts(fixture.db))[0].sets.find(set => set.id === lighter.id))
+    .toMatchObject({ recordKind: 'submaximal', repPrImprovement: 3 });
+});
+
+test('exercise setup notes can be saved, replaced and cleared without changing workout comments', async () => {
+  await database.initializeDatabase();
+  const { exercise, sessionId } = await plan();
+  await database.saveExerciseNote(fixture.db, exercise.id, ' Chair 4 ');
+  expect(await database.listExerciseNotes(fixture.db)).toEqual([{ exerciseId: exercise.id, note: 'Chair 4' }]);
+  await database.saveExerciseAnnotation(fixture.db, sessionId, exercise, { comment: 'Sore today', excludeAll: false, excludedPositions: [] });
+  await database.saveExerciseNote(fixture.db, exercise.id, 'Chair 5');
+  expect((await database.listExerciseAnnotations(fixture.db, sessionId))[0].comment).toBe('Sore today');
+  await database.saveExerciseNote(fixture.db, exercise.id, '');
+  expect(await database.listExerciseNotes(fixture.db)).toEqual([{ exerciseId: exercise.id, note: '' }]);
+});
+
+
+test('upgrading an existing database relabels lighter rep records without deleting history', async () => {
+  fixture.connection.exec(readFileSync(join(__dirname, 'fixtures/baseline-2026-10-15.sql'), 'utf8'));
+  fixture.connection.exec(`
+    INSERT INTO exercises VALUES (1, 'Bench');
+    INSERT INTO logged_sessions (id, start_time, finish_time, training_day_name, routine_name)
+      VALUES (1, '2026-10-01', '2026-10-01', 'Day', 'Routine');
+    INSERT INTO logged_exercises (id, exercise_id, logged_session_id, position, prescribed_sets, exercise_name)
+      VALUES (1, 1, 1, 0, 3, 'Bench');
+    INSERT INTO logged_sets (id, logged_exercise_id, order_number, reps, weight, rep_pr_improvement)
+      VALUES (1, 1, 0, 5, 100, NULL), (2, 1, 1, 10, 80, 2), (3, 1, 2, 6, 100, 1);
+  `);
+  await database.initializeDatabase();
+  expect((await database.listSavedSessionSets(fixture.db, 1)).map(set => set.recordKind)).toEqual([null, 'submaximal', 'pr']);
+  expect(count('logged_sets')).toBe(3);
 });

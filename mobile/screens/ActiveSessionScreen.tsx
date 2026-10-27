@@ -4,24 +4,26 @@ import AddWorkoutExercise from '../components/AddWorkoutExercise';
 import WorkoutSetTable from '../components/WorkoutSetTable';
 import { Fragment, useEffect, useRef, useState } from 'react'; import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../App';
-import { finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, getExerciseWeightOptions, listLastSetWeights, listSetRepRecords, getProgressionMode, listExerciseAnnotations, saveExerciseAnnotation, listSavedSessionSets, saveCompletedSet } from '../database';
+import { listExerciseNotes, finishLoggedSession, getLoggedSession, initializeDatabase, listExercisesInTrainingDay, getExerciseWeightOptions, listLastSetWeights, listSetRepRecords, getProgressionMode, listExerciseAnnotations, saveExerciseAnnotation, listSavedSessionSets, saveCompletedSet } from '../database';
 import type { ProgressionMode } from '../database';
 import { inferWeightOptions } from '../weightOptions';
 import type { WeightOptions } from '../weightOptions';
 import ExerciseOptionsModal from '../components/ExerciseOptionsModal';
+import ExerciseNoteModal from '../components/ExerciseNoteModal';
 import ExerciseHistoryModal from '../components/ExerciseHistoryModal';
 import WeightPicker from '../components/WeightPicker';
 import PersonalRecordCelebration from '../components/PersonalRecordCelebration';
 import type { Exercise, ExerciseAnnotation, LastSetReps, LastSetWeight, TrainingDayExercise } from '../database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveSession'>;
-type SetDraft = { reps: number | null; weight: string; completed: boolean; rememberWeight?: boolean; isPersonalRecord?: boolean };
+type SetDraft = { reps: number | null; weight: string; completed: boolean; rememberWeight?: boolean; isPersonalRecord?: boolean; isSubmaximalRecord?: boolean };
 
 export default function ActiveSessionScreen({ route, navigation }: Props) {
   const [isWeightInteracting, setIsWeightInteracting] = useState(false);
   const [progression, setProgression] = useState<ProgressionMode>('hypertrophy');
   const { sessionId } = route.params; // braces unpack field from object route.params here. it's like route.params.sessionId
   const [dayName, setDayName] = useState('');
+  const [setupNotes, setSetupNotes] = useState<Record<number, string>>({});
   const [exerciseWeights, setExerciseWeights] = useState<Record<number, WeightOptions>>({});
   const [lastSetReps, setLastSetReps] = useState<LastSetReps[]>([]);
   const [lastSetWeights, setLastSetWeights] = useState<LastSetWeight[]>([]);
@@ -36,6 +38,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
   const [annotations, setAnnotations] = useState<Record<number, ExerciseAnnotation>>({});
   const [options, setOptions] = useState<{ exercise: TrainingDayExercise; mode: 'comment' | 'tracking' } | null>(null);
   const [menuExercise, setMenuExercise] = useState<TrainingDayExercise | null>(null);
+  const [noteExercise, setNoteExercise] = useState<TrainingDayExercise | null>(null);
   const [historyExercise, setHistoryExercise] = useState<TrainingDayExercise | null>(null);
   const [recordCount, setRecordCount] = useState(0);
   const [isSavingSet, setIsSavingSet] = useState(false);
@@ -69,6 +72,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
 
       try {
         const db = await initializeDatabase();
+        const notes = await listExerciseNotes(db);
         const session = await getLoggedSession(db, sessionId);
         if (!session) throw new Error('Session not found');
 
@@ -108,7 +112,8 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
           }
           drafts[id][saved.setPosition] = {
             completed: true, reps: saved.reps,
-            isPersonalRecord: (saved.repPrImprovement ?? 0) > 0,
+            isPersonalRecord: saved.recordKind === 'pr',
+            isSubmaximalRecord: saved.recordKind === 'submaximal',
             weight: saved.weight === null ? '' : String(saved.weight),
           };
         }
@@ -149,6 +154,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
           return inferWeightOptions(logged.length ? logged : [exercise.prescribedWeightFirstSet]);
         }));
         if (!cancelled) {
+          setSetupNotes(Object.fromEntries(notes.map(note => [note.exerciseId, note.note])));
           setLastSetWeights(lastWeights);
           setProgression(mode);
           setLastSetReps(lastReps);
@@ -262,7 +268,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
       setSetDrafts(current => ({
         ...current,
         [exerciseId]: current[exerciseId].map((item, position) =>
-          position === index ? { ...item, completed: true, isPersonalRecord: result.isPersonalRecord } : item
+          position === index ? { ...item, completed: true, isPersonalRecord: result.isPersonalRecord, isSubmaximalRecord: result.isSubmaximalRecord } : item
         ),
       }));
     } catch (cause) {
@@ -438,6 +444,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                 </Pressable>
                 )}
               </View>
+              {!!setupNotes[exercise.id] && <Text style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>{setupNotes[exercise.id]}</Text>}
               {!!annotations[exercise.id]?.comment && <Text style={{ marginTop: 8 }}>{annotations[exercise.id].comment}</Text>}
               {annotations[exercise.id]?.excludeAll && <Text>All sets excluded from PRs and plots</Text>}
               {!completedExerciseIds.includes(exercise.id) && expandedExerciseId === exercise.id && (
@@ -485,6 +492,10 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                                 {set.completed ? 'Completed' : isSavingSet ? 'Saving…' : 'Complete set'}
                               </Text>
                             </Pressable>
+                            {set.completed && (set.isPersonalRecord || set.isSubmaximalRecord) &&
+                              <Text style={{ marginTop: 4, fontSize: 11, color: set.isPersonalRecord ? '#166534' : '#64748b', textAlign: 'center' }}>
+                                {set.isPersonalRecord ? 'PR' : 'Submaximal PR'}
+                              </Text>}
                           </View>
                         </View>
                       </View>
@@ -500,7 +511,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                       const reps = lastSetReps.find(item => item.exerciseId === exercise.id && item.setPosition === sets.length
                         && item.weight === Number(weight))?.reps ?? previous.reps;
                       return { ...current, [exercise.id]: [...sets, {
-                        ...previous, weight, reps, completed: false,
+                        ...previous, weight, reps, completed: false, isPersonalRecord: false, isSubmaximalRecord: false,
                       }] };
                     })} />}
                 </View>
@@ -520,12 +531,17 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
         <View style={{ backgroundColor: '#fff', padding: 24, borderRadius: 12, gap: 16 }}>
           <Text style={{ fontSize: 22 }}>{menuExercise.name}</Text>
           <Button title="View exercise history" onPress={() => { setHistoryExercise(menuExercise); setMenuExercise(null); }} />
+          <Button title="Setup note" disabled={menuExercise.id < 0}
+            onPress={() => { setNoteExercise(menuExercise); setMenuExercise(null); }} />
           <Button title="Add comment" onPress={() => { setOptions({ exercise: menuExercise, mode: 'comment' }); setMenuExercise(null); }} />
           <Button title="Exclude sets from tracking" onPress={() => { setOptions({ exercise: menuExercise, mode: 'tracking' }); setMenuExercise(null); }} />
           <Button title="Cancel exercise menu" onPress={() => setMenuExercise(null)} />
         </View>
       </View>}
     </Modal>
+    {noteExercise && <ExerciseNoteModal key={noteExercise.id} exercise={noteExercise}
+      onSaved={note => setSetupNotes(current => ({ ...current, [noteExercise.id]: note }))}
+      onClose={() => setNoteExercise(null)} />}
     {historyExercise && <ExerciseHistoryModal key={historyExercise.id} exerciseId={historyExercise.id}
       name={historyExercise.name} sessionId={sessionId} onClose={() => setHistoryExercise(null)} />}
     {options && <ExerciseOptionsModal key={`${options.exercise.id}-${options.mode}`}
@@ -555,7 +571,7 @@ export default function ActiveSessionScreen({ route, navigation }: Props) {
                 {!!annotations[exercise.id]?.comment && <Text>{annotations[exercise.id].comment}</Text>}
                 <WorkoutSetTable showSetNumber rows={setDrafts[exercise.id].flatMap((set, index) => set.completed ? [{
                   id: index, setNumber: index + 1, weight: set.weight.trim() ? Number(set.weight.replace(',', '.')) : null, reps: set.reps,
-                  isPR: set.isPersonalRecord, excluded: annotations[exercise.id]?.excludeAll || annotations[exercise.id]?.excludedPositions.includes(index),
+                  isPR: set.isPersonalRecord, isSubmaximalPR: set.isSubmaximalRecord, excluded: annotations[exercise.id]?.excludeAll || annotations[exercise.id]?.excludedPositions.includes(index),
                 }] : [])} />
               </View>
             ))}

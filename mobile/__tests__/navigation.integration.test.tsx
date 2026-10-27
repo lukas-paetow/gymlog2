@@ -12,6 +12,7 @@ jest.mock('@react-native-community/slider', () => {
   return (props: object) => React.createElement(require('react-native').View, props);
 });
 jest.mock('../database', () => ({
+  listExerciseNotes: jest.fn(),
   getExerciseWeightOptions: jest.fn(),
   listExercisesWithRecords: jest.fn(), listExerciseProgress: jest.fn(),
   initializeDatabase: jest.fn(), listFinishedWorkouts: jest.fn(), getProgressionMode: jest.fn(), setProgressionMode: jest.fn(), getDateFormat: jest.fn(),
@@ -35,6 +36,7 @@ beforeEach(() => {
   db.setProgressionMode.mockResolvedValue();
   db.getExerciseWeightOptions.mockResolvedValue({ weights: [], increments: [] });
   db.listFinishedWorkouts.mockResolvedValue([]);
+  db.listExerciseNotes.mockResolvedValue([]);
   db.getResumableSession.mockResolvedValue(null);
   db.getStartScreenOrder.mockResolvedValue([]);
   db.setStartScreenOrder.mockResolvedValue();

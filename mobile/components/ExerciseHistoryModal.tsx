@@ -41,6 +41,14 @@ export default function ExerciseHistoryModal({ exerciseId, name, sessionId, onCl
   const recordWeight = selectedWeight ?? rows.find(row => !row.excluded && row.weight !== null)?.weight;
   const recordSets = rows.filter(row => !row.excluded && row.weight !== null && row.weight === recordWeight);
   const recordReps = recordSets.length ? Math.max(...recordSets.map(row => row.reps)) : null;
+  // One best set at each recorded weight; heavier weights take priority over reps.
+  const bestByWeight = new Map<number, ExerciseHistorySet>();
+  for (const row of rows) {
+    if (row.excluded || row.weight === null) continue;
+    const best = bestByWeight.get(row.weight);
+    if (!best || row.reps > best.reps) bestByWeight.set(row.weight, row);
+  }
+  const bestSets = [...bestByWeight.values()].sort((a, b) => b.weight! - a.weight! || b.reps - a.reps);
   return <Modal visible animationType="slide" onRequestClose={onClose}>
     <View style={{ flex: 1, padding: 24, paddingTop: 48, gap: 16 }}>
       <Text style={{ fontSize: 24 }}>{name} history</Text>
@@ -48,6 +56,13 @@ export default function ExerciseHistoryModal({ exerciseId, name, sessionId, onCl
         {recordReps === null ? 'No tracked PR yet.' : `All-time PR at ${recordWeight} kg: ${recordReps} reps`}
       </Text>}
       <ScrollView scrollEnabled={!isWeightInteracting} contentContainerStyle={{ gap: 16 }}>
+        {!loading && !error && bestSets.length > 0 && <View style={{ gap: 6 }}>
+          <Text style={{ fontSize: 18 }}>All-time best sets</Text>
+          {bestSets.map(set => <View key={set.weight} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text>{set.weight} kg × {set.reps} reps</Text>
+            <Text style={{ color: '#6b7280', fontSize: 12 }}>{formatWorkoutDate(set.finishTime, format)}</Text>
+          </View>)}
+        </View>}
         {!loading && !error && <View style={{ gap: 8 }}>
           <Text style={{ fontSize: 18 }}>Last 2 months</Text>
           {recent.length === 0 ? <Text>No tracked sets with a weight in the last two months.</Text> : <>

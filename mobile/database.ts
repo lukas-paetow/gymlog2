@@ -39,11 +39,13 @@ export type FinishedWorkout = {
     setPosition: number;
     weight: number | null;
     reps: number;
+    recordKind?: 'pr' | 'submaximal' | null;
     repPrImprovement?: number | null;
   }[];
 };
 
 export type SavedSessionSet = {
+  recordKind?: 'pr' | 'submaximal' | null;
   repPrImprovement?: number | null;
   loggedExerciseId: number;
   exerciseId: number | null;
@@ -102,6 +104,10 @@ export const createExercisesTable = `
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS exercise_notes (
+    exercise_id INTEGER PRIMARY KEY REFERENCES exercises(id) ON DELETE CASCADE,
+    note TEXT NOT NULL
+  );
 `;
 
 export const createLoggedSessionsTable = `
@@ -137,6 +143,7 @@ export const createLoggedSetTable = `
     logged_exercise_id INTEGER NOT NULL,
     order_number INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    record_kind TEXT CHECK (record_kind IN ('pr', 'submaximal')),
     rep_pr_improvement INTEGER CHECK (rep_pr_improvement >= 0),
     weight REAL,
     comment TEXT,
@@ -227,7 +234,7 @@ export async function listExerciseAnnotations(db: SQLite.SQLiteDatabase, session
 
 // Positions come from the active workout, not the training-day template.
 // Assign the exercise position on its first saved set and retain it afterward.
-export type SavedSetResult = { id: number; isPersonalRecord: boolean; prescribedReps?: number };
+export type SavedSetResult = { id: number; isPersonalRecord: boolean; isSubmaximalRecord?: boolean; prescribedReps?: number };
 
 export async function saveCompletedSet(
     db: SQLite.SQLiteDatabase,
@@ -249,6 +256,7 @@ export async function saveCompletedSet(
 
         let setId = 0;
         let isPersonalRecord = false;
+        let isSubmaximalRecord = false;
         let prescribedReps: number | undefined;
 
         await db.withTransactionAsync(async () => {
@@ -299,21 +307,31 @@ export async function saveCompletedSet(
                 weight,
             );
 
+            const heaviest = await db.getFirstAsync<{ weight: number | null }>(
+              `SELECT MAX(sets.weight) AS weight FROM logged_sets AS sets
+               JOIN logged_exercises AS exercises ON exercises.id = sets.logged_exercise_id
+               WHERE exercises.exercise_id = ? AND ${trackedSetCondition('sets', 'exercises')}`, exercise.id);
+            const previousWeight = heaviest?.weight ?? null;
             const previousMax = record?.maxReps ?? null; // optional chaining - only if record exists, else null
             const improvement = excluded || previousMax === null
                 ? null
                 : Math.max(0, reps - previousMax);
 
+            isPersonalRecord = !excluded && previousWeight !== null &&
+              (weight > previousWeight || (weight === previousWeight && (improvement ?? 0) > 0));
+            isSubmaximalRecord = !excluded && previousWeight !== null && weight < previousWeight && (improvement ?? 0) > 0;
+            const recordKind = isPersonalRecord ? 'pr' : isSubmaximalRecord ? 'submaximal' : null;
             const result = await db.runAsync(
                 `INSERT INTO logged_sets (
                     logged_exercise_id, order_number,
-                    reps, weight, rep_pr_improvement
-                 ) VALUES (?, ?, ?, ?, ?)`,
+                    reps, weight, rep_pr_improvement, record_kind
+                 ) VALUES (?, ?, ?, ?, ?, ?)`,
                 loggedExercise.id,
                 setPosition,
                 reps,
                 weight,
                 improvement,
+                recordKind,
             );
 
             if (rememberWeight) {
@@ -321,8 +339,7 @@ export async function saveCompletedSet(
                   ON CONFLICT(exercise_id, weight) DO NOTHING`, exercise.id, weight);
             }
             setId = result.lastInsertRowId;
-            isPersonalRecord = improvement !== null && improvement > 0;
-            if (isPersonalRecord && await getProgressionMode(db) === 'hypertrophy') {
+            if ((isPersonalRecord || isSubmaximalRecord) && await getProgressionMode(db) === 'hypertrophy') {
                 await db.runAsync(
                     `UPDATE day_exercises SET prescribed_reps_firstset = ?
                      WHERE training_day_id = ? AND exercise_id = ?`,
@@ -332,7 +349,7 @@ export async function saveCompletedSet(
             }
         });
 
-        return { id: setId, isPersonalRecord, ...(prescribedReps === undefined ? {} : { prescribedReps }) };
+        return { id: setId, isPersonalRecord, ...(isSubmaximalRecord ? { isSubmaximalRecord } : {}), ...(prescribedReps === undefined ? {} : { prescribedReps }) };
     });
 }
 
@@ -411,6 +428,25 @@ export async function initializeDatabase() {
           ${createLoggedSetTable}
           ${createExerciseAnnotationsTables}
           ${createSettingsTable}`);
+        const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(logged_sets)');
+        if (!columns.some(column => column.name === 'record_kind')) {
+          await db.withTransactionAsync(async () => {
+            await db.execAsync("ALTER TABLE logged_sets ADD COLUMN record_kind TEXT CHECK (record_kind IN ('pr', 'submaximal'))");
+            // Preserve old rep records, distinguishing lighter records from the prior maximum weight.
+            await db.execAsync(`UPDATE logged_sets SET record_kind = CASE WHEN weight < (
+              SELECT MAX(older.weight) FROM logged_sets AS older
+              JOIN logged_exercises AS old_ex ON old_ex.id = older.logged_exercise_id
+              JOIN logged_exercises AS current_ex ON current_ex.id = logged_sets.logged_exercise_id
+              JOIN logged_sessions AS old_session ON old_session.id = old_ex.logged_session_id
+              JOIN logged_sessions AS current_session ON current_session.id = current_ex.logged_session_id
+              WHERE (old_ex.exercise_id = current_ex.exercise_id OR
+                  (old_ex.exercise_id IS NULL AND current_ex.exercise_id IS NULL AND old_ex.exercise_name = current_ex.exercise_name))
+                AND (old_session.start_time < current_session.start_time OR
+                  (old_session.start_time = current_session.start_time AND older.id < logged_sets.id))
+                AND ${trackedSetCondition('older', 'old_ex')}
+            ) THEN 'submaximal' ELSE 'pr' END WHERE rep_pr_improvement > 0`);
+          });
+        }
         return db;
       })().catch(error => {
         databaseReady = undefined;
@@ -738,13 +774,14 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
       setPosition: number;
       weight: number | null;
       reps: number;
+      recordKind: 'pr' | 'submaximal' | null;
       repPrImprovement: number | null;
     }>(
       `SELECT logged_sessions.id AS sessionId,
               training_days.routine_id AS routineId, training_days.position + 1 AS trainingDayNumber,
               training_day_name AS trainingDayName, routine_name AS routineName,
               finish_time AS finishTime, logged_sets.id AS setId, logged_exercises.id AS loggedExerciseId,
-              logged_sets.rep_pr_improvement AS repPrImprovement,
+              logged_sets.record_kind AS recordKind, logged_sets.rep_pr_improvement AS repPrImprovement,
               COALESCE(library.name, logged_exercises.exercise_name) AS exerciseName, order_number AS setPosition, weight, reps,
               notes.comment AS exerciseComment, (${trackedSetCondition('logged_sets', 'logged_exercises')}) AS tracked
        FROM logged_sessions
@@ -778,7 +815,7 @@ export async function listFinishedWorkouts(db: SQLite.SQLiteDatabase): Promise<F
       workout.sets.push({
         id: row.setId, loggedExerciseId: row.loggedExerciseId, exerciseName: row.exerciseName, setPosition: row.setPosition,
         weight: row.weight, reps: row.reps,
-        repPrImprovement: row.repPrImprovement,
+        recordKind: row.recordKind, repPrImprovement: row.repPrImprovement,
         ...(row.exerciseComment ? { exerciseComment: row.exerciseComment } : {}),
         ...(row.tracked === 0 ? { excludedFromTracking: true } : {}),
       });
@@ -883,7 +920,7 @@ export async function listSavedSessionSets(db: SQLite.SQLiteDatabase, sessionId:
             prescribed_sets AS prescribedSets,
             prescribed_weight_firstset AS prescribedWeightFirstSet,
             prescribed_reps_firstset AS prescribedRepsFirstSet,
-            order_number AS setPosition, reps, weight, rep_pr_improvement AS repPrImprovement
+            order_number AS setPosition, reps, weight, record_kind AS recordKind, rep_pr_improvement AS repPrImprovement
      FROM logged_exercises
      LEFT JOIN exercises AS library ON library.id = logged_exercises.exercise_id
      JOIN logged_sets ON logged_sets.logged_exercise_id = logged_exercises.id
@@ -1254,11 +1291,18 @@ async function rebuildExerciseRecords(db: SQLite.SQLiteDatabase, exercise: Edita
      ORDER BY sessions.start_time, sessions.id, exercises.position, sets.order_number, sets.id`,
     exercise.exerciseId, exercise.exerciseId, exercise.name);
   const bests = new Map<number, number>();
+  let maxWeight: number | null = null;
   for (const set of history) {
     const previous = set.weight === null ? undefined : bests.get(set.weight);
     const improvement = !set.tracked || set.weight === null || previous === undefined ? null : Math.max(0, set.reps - previous);
-    await db.runAsync('UPDATE logged_sets SET rep_pr_improvement = ? WHERE id = ?', improvement, set.id);
-    if (set.tracked && set.weight !== null) bests.set(set.weight, Math.max(previous ?? set.reps, set.reps));
+    const record = set.tracked && set.weight !== null && maxWeight !== null
+      ? set.weight > maxWeight ? 'pr' : (improvement ?? 0) > 0 ? (set.weight === maxWeight ? 'pr' : 'submaximal') : null
+      : null;
+    await db.runAsync('UPDATE logged_sets SET rep_pr_improvement = ?, record_kind = ? WHERE id = ?', improvement, record, set.id);
+    if (set.tracked && set.weight !== null) {
+      bests.set(set.weight, Math.max(previous ?? set.reps, set.reps));
+      maxWeight = Math.max(maxWeight ?? set.weight, set.weight);
+    }
   }
 }
 
@@ -1316,4 +1360,16 @@ export async function deleteFinishedWorkout(db: SQLite.SQLiteDatabase, sessionId
     await db.runAsync('DELETE FROM logged_exercises WHERE logged_session_id = ?', sessionId);
     await db.runAsync('DELETE FROM logged_sessions WHERE id = ?', sessionId);
   }));
+}
+
+/** Persistent equipment/setup notes, separate from comments on a logged workout. */
+export async function listExerciseNotes(db: SQLite.SQLiteDatabase): Promise<{ exerciseId: number; note: string }[]> {
+  return measureDb('listExerciseNotes', () => db.getAllAsync('SELECT exercise_id AS exerciseId, note FROM exercise_notes'));
+}
+
+export async function saveExerciseNote(db: SQLite.SQLiteDatabase, exerciseId: number, note: string): Promise<void> {
+  return measureDb('saveExerciseNote', async () => {
+    await db.runAsync(`INSERT INTO exercise_notes (exercise_id, note) VALUES (?, ?)
+      ON CONFLICT(exercise_id) DO UPDATE SET note = excluded.note`, exerciseId, note.trim());
+  });
 }

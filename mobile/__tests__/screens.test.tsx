@@ -33,7 +33,7 @@ jest.mock('../components/WeightPicker', () => {
     React.createElement(require('react-native').TextInput, { value, onChangeText: onChange, editable: !disabled, accessibilityLabel: label, availableWeights: weights });
 });
 jest.mock('../database', () => {
-  const names = ['initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'getExerciseWeightOptions', 'setExerciseWeights', 'deleteFinishedWorkout', 'updateLoggedSet', 'addLoggedSet', 'deleteLoggedSet', 'listFinishedWorkouts',
+  const names = ['listExerciseNotes', 'saveExerciseNote', 'initializeDatabase', 'listExercisesWithRecords', 'deleteExercise', 'getExerciseWeightOptions', 'setExerciseWeights', 'deleteFinishedWorkout', 'updateLoggedSet', 'addLoggedSet', 'deleteLoggedSet', 'listFinishedWorkouts',
     'getProgressionMode', 'setProgressionMode', 'getDateFormat', 'setDateFormat', 'seedDemoHistory', 'getResumableSession', 'getStartScreenOrder', 'setStartScreenOrder', 'reorderTrainingDayExercises', 'getActiveRoutineId', 'setActiveRoutine', 'listReusableTrainingDays', 'updateExercisePrescription', 'listRoutines', 'listTrainingDays',
     'createLoggedSession', 'getLoggedSession', 'listExercisesInTrainingDay', 'listExerciseAnnotations', 'listExerciseHistory', 'saveExerciseAnnotation', 'listSetRepRecords', 'listLastSetWeights', 'listSavedSessionSets', 'saveCompletedSet',
     'finishLoggedSession', 'listExercises', 'insertRoutine', 'updateRoutine', 'insertExercise', 'deleteRoutine'];
@@ -73,6 +73,7 @@ beforeEach(() => {
   db.initializeDatabase.mockResolvedValue({} as Awaited<ReturnType<typeof database.initializeDatabase>>);
   db.listExercisesWithRecords.mockResolvedValue([]);
   db.listFinishedWorkouts.mockResolvedValue([]);
+  db.listExerciseNotes.mockResolvedValue([]);
   db.getDateFormat.mockResolvedValue('DD/MM/YYYY');
   db.getProgressionMode.mockResolvedValue('hypertrophy');
   db.setProgressionMode.mockResolvedValue();
@@ -1121,4 +1122,19 @@ test('log edit mode adds sets and the row editor confirms single-set deletion', 
   await chooseAlert('Delete set');
   expect(db.deleteLoggedSet).toHaveBeenCalledWith(expect.anything(), 1, 12);
   expect(screen.queryByLabelText('Edit Dips: -12.5 kg × 9 reps')).toBeNull();
+});
+
+
+test('library setup notes save independently and appear in the active workout', async () => {
+  db.listExercisesWithRecords.mockResolvedValue([{ id: 7, name: 'Dips', heaviestWeight: null, repsAtHeaviestWeight: null }]);
+  db.listExerciseNotes.mockResolvedValue([{ exerciseId: 7, note: 'Chair 4' }]);
+  const library = await render(<ExerciseLibraryScreen />);
+  await fireEvent.press(await screen.findByRole('button', { name: 'Setup note for Dips' }));
+  await waitFor(() => expect(screen.getByLabelText('Exercise setup note').props.value).toBe('Chair 4'));
+  await fireEvent.changeText(screen.getByLabelText('Exercise setup note'), 'Chair 5');
+  await fireEvent.press(screen.getByRole('button', { name: 'Save setup note' }));
+  expect(db.saveExerciseNote).toHaveBeenCalledWith(expect.anything(), 7, 'Chair 5');
+  await library.unmount();
+  await renderActive();
+  expect(screen.getByText('Chair 4')).toBeVisible();
 });

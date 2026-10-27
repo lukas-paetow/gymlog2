@@ -317,3 +317,20 @@ scroll during dragging. Reanimated 4.5.1 / Worklets 0.10.1 match Expo SDK 57.
 Routine deletion is available inside the existing routine editor (View → Edit
 routine), with confirmation; it is no longer on overview rows. Successful deletion
 closes the editor.
+
+
+### Weight-first records and exercise setup notes
+
+- `logged_sets.record_kind` stores `pr`, `submaximal`, or NULL. A higher tracked
+  weight beats reps; a rep improvement at the highest weight is a main PR, while
+  a rep improvement below it is a muted submaximal PR. The first tracked set is a
+  baseline. Same-weight rep deltas remain separate. Only main PRs celebrate;
+  both record kinds retain the existing hypertrophy target update. Historical
+  edits rebuild both markers. Startup adds the column atomically and relabels
+  existing positive rep records using prior tracked weights.
+- `exercise_notes` stores editable library-level setup text, distinct from
+  session comments. The library's Setup note button opens `ExerciseNoteModal`;
+  active workouts load these notes and show them in smaller muted text.
+- The active exercise-history modal shows all-time best reps at each tracked
+  weight, sorted heaviest first with dates, above the existing two-month plot.
+  Excluded sets are omitted; the current session stays out of past history.

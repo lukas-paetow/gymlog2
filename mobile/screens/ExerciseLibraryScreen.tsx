@@ -6,10 +6,12 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { deleteExercise, initializeDatabase, listExercisesWithRecords } from '../database';
 import type { ExerciseWithRecord } from '../database';
 
+import ExerciseNoteModal from '../components/ExerciseNoteModal';
 import ExerciseWeightsModal from '../components/ExerciseWeightsModal';
 
 export default function ExerciseLibraryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [noteExercise, setNoteExercise] = useState<ExerciseWithRecord | null>(null);
   const [weightExercise, setWeightExercise] = useState<ExerciseWithRecord | null>(null);
   const [exercises, setExercises] = useState<ExerciseWithRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,6 +102,7 @@ export default function ExerciseLibraryScreen() {
                 <Button title="X" accessibilityLabel={`Delete ${exercise.name}`} color="#b91c1c"
                   disabled={isDeleting} onPress={() => confirmDelete(exercise)} />
               </View>
+              <Button title="Setup note" accessibilityLabel={`Setup note for ${exercise.name}`} onPress={() => setNoteExercise(exercise)} />
               {exercise.heaviestWeight === null ? <Text>No record yet.</Text> : (
                 <>
                   <Text>Personal Record: {exercise.heaviestWeight} kg / {exercise.repsAtHeaviestWeight} reps</Text>
@@ -110,6 +113,7 @@ export default function ExerciseLibraryScreen() {
         </>
       )}
     </ScrollView>
+    {noteExercise && <ExerciseNoteModal exercise={noteExercise} onClose={() => setNoteExercise(null)} />}
     {weightExercise && <ExerciseWeightsModal key={weightExercise.id} exercise={weightExercise} exercises={exercises} onClose={() => setWeightExercise(null)} />}
     </>
   );

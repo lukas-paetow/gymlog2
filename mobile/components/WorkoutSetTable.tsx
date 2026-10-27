@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export type WorkoutTableRow = {
   id: number | string; weight: number | null; reps: number | null;
-  exerciseName?: string; comment?: string; isPR?: boolean; excluded?: boolean;
+  exerciseName?: string; comment?: string; isPR?: boolean; isSubmaximalPR?: boolean; excluded?: boolean;
   setNumber?: number;
 };
 type Props = { rows: WorkoutTableRow[]; showExercise?: boolean; showSetNumber?: boolean; disabled?: boolean;
@@ -27,7 +27,7 @@ export default function WorkoutSetTable({ rows, showExercise = false, showSetNum
         <Text style={[styles.weight, showSetNumber && styles.summaryWeight]}>{row.weight ?? '—'}</Text><Text style={styles.times}>×</Text>
         <Text style={[styles.reps, showSetNumber && styles.summaryReps]}>{row.reps ?? '—'}</Text>
         {showSetNumber && <View style={{ flex: 1 }} />}
-        <View style={styles.badgeSpace}>{row.isPR && !row.excluded && <Text style={styles.badge}>PR</Text>}</View>
+        <View style={styles.badgeSpace}>{row.isSubmaximalPR && !row.excluded && <Text accessibilityLabel="Submaximal PR" style={styles.submaximal}>sub PR</Text>}{row.isPR && !row.excluded && <Text style={styles.badge}>PR</Text>}</View>
         {showSetNumber && <Text style={styles.setNumber}>{row.setNumber}</Text>}
         {row.excluded && <Text style={styles.excluded}>Excluded from PRs and plots</Text>}
       </>;
@@ -54,6 +54,7 @@ const styles = StyleSheet.create({
   times: { width: 8, textAlign: 'center', color: '#64748b' },
   reps: { width: 32, textAlign: 'right', fontVariant: ['tabular-nums'] }, badgeSpace: { width: 26, textAlign: 'center' },
   badge: { color: '#166534', backgroundColor: '#dcfce7', borderRadius: 4, fontSize: 11, fontWeight: '700', textAlign: 'center', paddingVertical: 3 },
+  submaximal: { color: '#64748b', fontSize: 9, textAlign: 'center' },
   excluded: { width: '100%', fontSize: 11, color: '#64748b' }, note: { fontSize: 12, color: '#64748b' },
   summaryWeight: { textAlign: 'left', width: 44 }, summaryReps: { textAlign: 'left' },
   setNumber: { width: 26, textAlign: 'right', color: '#64748b', fontVariant: ['tabular-nums'] },
