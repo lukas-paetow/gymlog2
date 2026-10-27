@@ -1,4 +1,4 @@
-export const DATE_FORMATS = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD', 'system'] as const;
+export const DATE_FORMATS = ['DD/MM/YYYY', 'MM/DD/YYYY', 'system'] as const;
 export type DateFormat = typeof DATE_FORMATS[number];
 export const DEFAULT_DATE_FORMAT: DateFormat = 'DD/MM/YYYY';
 
@@ -16,6 +16,5 @@ export function formatWorkoutDate(timestamp: string, format: DateFormat): string
   switch (format) {
     case 'DD/MM/YYYY': return `${day}/${month}/${year}`;
     case 'MM/DD/YYYY': return `${month}/${day}/${year}`;
-    case 'YYYY-MM-DD': return `${year}-${month}-${day}`;
   }
 }

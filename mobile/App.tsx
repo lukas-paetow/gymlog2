@@ -1,4 +1,4 @@
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler'; // holding and dragging, reordering
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import StartScreen from './screens/StartScreen';
@@ -12,6 +12,7 @@ import SettingsScreen from './screens/SettingsScreen';
 
 // compile-time visibility when we import this somewhere else. like a struc in c++
 // field name: field type. undefined means that this field takes no parameters
+// only for type checking
 export type RootStackParamList = {
   Start: undefined;
   ExerciseLibrary: undefined;
@@ -27,7 +28,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }}> 
     <NavigationContainer>
       <Stack.Navigator>
         <Stack.Screen name="Start" component={StartScreen} />
